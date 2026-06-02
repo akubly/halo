@@ -148,3 +148,106 @@ Standardize shared playground scaffold across Python, Flutter, and Web platforms
 **Risks:** Templates become stale; mitigation is CI validation. Developers may copy-paste without understanding; mitigation is heavy comments + SDK docs reference.
 
 ---
+
+### Sparse Radial HUD Principle
+**Author:** Da5id (Designer)  
+**Status:** Proposed
+
+After tracing Brilliant Labs' hardware evolution (Monocle → Frame → Halo), a consistent UX philosophy emerges. All Halo UI designs MUST follow these constraints:
+
+1. **Center-out composition** — Place primary content at center; secondary content at edges. Circular mask clips corners.
+2. **Maximum 3 visual elements per screen** — Icons > text. Numbers > sentences.
+3. **Glance budget: <1 second** — Content appears in upper peripheral vision; design for recognition.
+4. **Incremental updates only** — No double-buffer means no safe full-screen transitions. Update only the region that changed.
+5. **Input triad: button cycles, tap confirms, voice queries** — Mirror Brilliant's trajectory: diversify inputs, simplify display.
+
+Brilliant's hardware trajectory is a product thesis: **smart glasses are ambient displays, not wrist computers**.
+
+**Acceptance:** Pending Hiro (Architect) + YT (Engineer) review.
+
+---
+
+### Playground Roadmap Amendment — Lineage-Informed Re-prioritization
+**Status:** AMENDMENT (to initial draft)  
+**Author:** Enzo  
+**Date:** 2026-06-01
+
+After reviewing Brilliant's arc (Monocle → Frame → Halo), the Phase 1 project order should shift to align with Halo's hardware bets and strategic direction. **Audio is the new frontier** — Halo's stereo mics + bone-conduction speakers represent the first real audio I/O investment.
+
+**Revised Phase 1 Priority (Reordered):**
+
+1. **Workout Coach** (3–5 days) — NOW FIRST. Real-time form feedback via audio + IMU. Proves audio is the differentiator. Demonstrates host-peripheral model (Flutter app handles audio synthesis). Non-intrusive/advisory—exactly what Halo hardware is built for.
+
+2. **Bird Watcher** (1–2 days) — SECOND. Point Halo at birds; recognize species + log sighting. Validates Camera pipeline works; easy to compose with other sensors. Demonstrates host-driven inference.
+
+3. **Time Tracker** (2–3 days) — THIRD. Tap to toggle time tracking; display elapsed time on HUD. Web Bluetooth validates ecosystem breadth (not just Python/Flutter). Proves always-on low-power display works.
+
+**Rationale:** The lineage reveals that Brilliant is deliberately **simplifying the developer path** at each generation. Our playground should reflect this strategy: lead with audio (our only new hardware feature), showcase host-peripheral model, recruit multi-platform devs.
+
+**Revised launch:** Workout Coach → Bird Watcher → Time Tracker (starting 2026-06-08, target 2026-06-22). Awaiting Aaron's approval on re-prioritization.
+
+---
+
+### Future-Device Portability vs. Halo-Focused Design
+**Decision Date:** 2026-06-01  
+**Owner:** Hiro (Architect)  
+**Status:** PENDING RATIFICATION  
+
+**Decision:** Design this mono-repo for Halo, not future devices. Accept that Lua on-device APIs will change with hardware generations. Brilliant has shown willingness to break Lua contracts for clarity and velocity.
+
+**Rationale:**
+1. Premature abstraction is costly; Frame→Halo Lua breakage invalidates abstractions anyway.
+2. Host SDK APIs are stable. We don't need a "device abstraction layer" at the Python/Flutter level; SDK structure is portable.
+3. Mono-repo structure doesn't block future devices. If/when Halo 2 arrives, add `sdk-python-halo2/` or new major version branches.
+4. Language ecosystem constraints dominate; future hardware won't change that.
+
+**Commitment:** SDK directory names are device-agnostic (`sdk-python`, `sdk-flutter`, `sdk-webbluetooth`). Example apps are clearly labeled per device. No abstraction layer for "device-agnostic Lua event loop." Future device support is a *new major version*, not a new branch.
+
+**For Aaron:** Does this align with Brilliant's roadmap? Are there device families planned where a shared host-SDK abstraction would be valuable?
+
+---
+
+### Model Tier for Halo (Post-Evolution Analysis)
+**Date:** 2026-06-01  
+**Owner:** Librarian (AI/ML)  
+**Status:** Proposed (Amends prior hosted-multimodal recommendation)  
+
+**Prior decision:** Start with **hosted multimodal API** (Claude 3.5 Sonnet or GPT-4o). After tracing Brilliant's 3-generation trajectory, this recommendation is *strengthened*, not changed.
+
+**Why evolution validates the approach:** Monocle (64MHz) → Frame (still 64MHz, 256KB RAM) → Halo (M55 + NPU). Yet each generation chose cloud LLM. Monocle + Frame had no local LLM capacity. Halo added NPU, but Brilliant still keeps cloud LLM—NPU is for efficiency (wake-word, activity detection), not replacement.
+
+**Confidence table:**
+| Option | Monocle | Frame | Halo Signal | Confidence |
+|--------|---------|-------|-----------|-----------|
+| **Hosted Multimodal API** | ✅ Day 1 | ✅ Norm | ✅ Current design | **VERY HIGH** |
+| **Hybrid (Local STT + Cloud LLM)** | ❌ N/A | ✅ Noa uses Whisper | ✅ Still in use | **HIGH** |
+| **Local-First Small Models** | ❌ N/A | ❌ Nobody did it | ⚠️ NPU hints maybe | **LOW** |
+
+**Implication:** Copy Frame's Noa pattern exactly (immediately). Add Halo-specific on-device optimizations later if needed (wake-word, activity gating). Never attempt local LLM inference; both Monocle & Frame generations skipped this for a reason.
+
+**Recommendation unchanged:** Hosted multimodal API first. Confidence increased by 3-generation validation.
+
+---
+
+### Frame → Halo Migration — Silent Failure Gotchas
+**Date:** 2026-06-01
+**Status:** Open for team consensus
+**Impact:** Cross-team (devs copying Frame examples, QA verifying port correctness)
+
+**5 Silent Failure Gotchas (code compiles/runs but produces no output or crashes only at runtime):**
+
+1. **Halo Display Power-Save Default** — Ported Frame app displays nothing on Halo; no errors. Root cause: Halo display starts in `power_save(true)` mode; Frame starts enabled. Fix: Call `frame.display.power_save(false)` at startup.
+
+2. **TxSprite Wire Format Mismatch** — Images render with garbage/corruption. Root cause: Old host-side `brilliant-msg` mixed with new `data.lua`; compressed flag at wrong offset. Fix: Update ALL on-device Lua libraries via `upload_stdlua_libs()`.
+
+3. **Removed `data.parsers` Table** — App starts, Lua REPL works, but event loop crashes when first message arrives. Root cause: Frame-era `frame_app.lua` tries `data.parsers[MSG_CODE] = ...`; table doesn't exist. Why not caught: Parser registration is lazy; only fails when messages arrive.
+
+4. **IMU Data Type Change** — IMU values are correct magnitude but garbage precision; physics simulations drift. Root cause: Unpacking 6 × `int16` as calibrated `float32`; bytes misinterpreted. Why silent: No exception; values are plausible but wrong (1000x actual).
+
+5. **TxTextSpriteBlock API Change** — App runs fine until user triggers text display; crash at that point. Root cause: Code calls old constructor `TxTextSpriteBlock(text="Hello", ...)`; new API requires `.create_text_sprites()`. Why not immediate: Text rendering is often user-triggered.
+
+**Team-Wide Implications:** Frame SDK examples are NOT directly port-to-Halo. Copy-paste will silently fail. QA needs specific checklists. Lua library version tracking is critical. Integration tests must include message receipt.
+
+**Recommendation:** Create ported-app checklist, add lint rules, pin device firmware version, provide Frame→Halo migration script, document wire format compatibility matrix.
+
+---
