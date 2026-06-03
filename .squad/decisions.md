@@ -251,3 +251,106 @@ After reviewing Brilliant's arc (Monocle → Frame → Halo), the Phase 1 projec
 **Recommendation:** Create ported-app checklist, add lint rules, pin device firmware version, provide Frame→Halo migration script, document wire format compatibility matrix.
 
 ---
+
+## 2026-06-03
+
+### Aaron's Ideation Curation — User Preferences Ranked
+**Author:** Aaron Kubly (via Copilot directive)  
+**Date:** 2026-06-03  
+**Status:** CANONICAL DIRECTION (team baseline)  
+**Scope:** Design focus for all subsequent sprints
+
+**Summary:**  
+Aaron's curated selection from two rounds of ideation across 9 agents establishes team priorities. Three themes ranked by strategic value:
+
+**Theme Ranking (by Aaron):**
+1. 🥇 **Consent-Aware Memory** — useful. Privacy-forward recording device with mandatory per-person consent gates. Most-cited convergence across Hiro, Enzo, Librarian, Raven, Lagos.
+2. 🥈 **The Synesthetic Familiar** — fun. Joyful peripheral-aware creatures (Y.T. pet × Librarian synesthetic rendering × Da5id haptic feedback).
+3. 🥉 **Radial / Kinetic Interaction Language** — neat. Da5id's round-display vocabulary for time, notifications, breath pacing.
+
+**Aaron's 11 Selected Individual Ideas:**
+- Enzo #3 (Skill Atomizer) — Real-time task decomposition
+- Enzo #4 (Memory Ledger) — 12-hour on-device buffer
+- Ng #4 (Live Camera Peek) — 64×64 corner context window
+- Y.T. #1 (Pet Familiar) — Reactive creature in corner vision
+- Y.T. #2 (Skeleton Mirror) — Cartoonish pose feedback
+- Y.T. #4 (Fortune Teller) — Absurdist oracle from pixel chaos
+- Da5id #1 (Breathing Halo) — Ring paces breathing
+- Da5id #2 (Orbital Notifications) — Messages orbit rim
+- Librarian #2 (Synesthetic AI) — Abstract concepts as metaphors
+- Librarian #4 (Local World Model) — On-device 1–3s prediction
+- Raven #4 (Cryptographic Proofs) — Hash-only attention proof, no image storage
+
+**Notable Omissions:**
+- Zero ideas from Hiro (architecture/mesh), Lagos (community/meta), Juanita (chaos demos)
+- "Community as protocol" theme deliberately deprioritized
+- Enzo #1 (Social Reflex) omitted—Juanita had invalidated it in pass-2
+
+**Strategic Signal:**
+Bias toward fun-leaning, HUD-design-rich, on-device-AI-with-privacy projects. Deprioritize multi-device meshes, community ceremonies, chaos demos. Every spawned agent should calibrate to these preferences before proposing further work.
+
+---
+
+### Decision: Theme 1 (Consent-Aware Memory) as Phase-1 North Star
+**Author:** Enzo (Product/PM)  
+**Date:** 2026-06-03  
+**Status:** PROPOSED (awaiting Aaron approval)  
+**Scope:** Roadmap prioritization + architectural commitment
+
+**Summary:**  
+Aaron's curation converges on three themes. Enzo recommends **locking Theme 1 (Consent-Aware Memory) as the flagship North Star for Phase-1**, even though it's architecturally ambitious. This shapes every Phase-1 playground to feed a *personal memory ledger* prioritizing privacy by default.
+
+**Context:**  
+Theme 1 requires cross-layer infrastructure:
+- **SDK layer:** Raven's consent metadata in every message
+- **Data model:** Librarian's episodic stitching + versioning
+- **Hardware:** On-device LLM for prompt inference + privacy checks
+
+Easier to build privacy-first from day 1 than retrofit later.
+
+**Three Options Evaluated:**
+
+**Option A: Pick Theme 1, Prototype End-to-End** ✅ **RECOMMENDED**
+- Effort: High (weeks 1–12)
+- Risk: Architectural blocker in Lua VM or battery budget
+- Upside: Differentiates from Brilliant Noa; privacy becomes feature, not compliance checkbox
+
+**Option B: Sketch All Three in Parallel**
+- Effort: Very High (3 independent workstreams)
+- Risk: Context diffusion; integration hell at week 6
+- Upside: Risk hedging; data on resonance
+
+**Option C: Spike the Riskiest Assumption First**
+- Effort: Low (5-day spike)
+- Risk: Delays roadmap
+- Upside: De-risks Theme 1 before full commitment
+
+**Recommendation: Option A**
+
+**Rationale:**
+1. **Coherence:** Aaron's 11 picks aren't random; they cluster around privacy-first local reasoning.
+2. **Differentiation:** "Halo respects your privacy by design" is a competitive moat vs. Brilliant's streaming pattern.
+3. **Architectural soundness:** Privacy infrastructure must be foundational, not bolted-on.
+4. **Phase-1 Coherence:** Every playground demo becomes a data collection instrument feeding Theme 1 infrastructure.
+
+**Phase-1 Implementation Path:**
+1. **Week 1–2:** Ship Pet Familiar + Skeleton Mirror (joy narrative)
+2. **Week 3–6:** Build Memory Ledger infrastructure + consent layer (Theme 1 foundation)
+3. **Week 7–10:** Workout Coach + Bird Watcher (with memory hooks enabled)
+4. **Week 11–12:** Time Tracker redesigned as radial time (Theme 3 validation)
+
+**Known Risks:**
+| Risk | Mitigation |
+|------|-----------|
+| Battery overhead of consent negotiation | Spike in week 0 (Option C hybrid) |
+| Lua VM memory limits for episodic stitching | Prototype with simple test script |
+| Bystander notification latency | Design UI + UX flow before coding |
+| Privacy law uncertainty | Loop Raven + legal team into design reviews |
+
+**Decision Gate:**  
+Aaron must confirm:
+1. Is Theme 1 (Consent-Aware Memory) the North Star? Y/N
+2. Should Phase-1 reorder to joy-first (Pet + Skeleton before Workout Coach)? Y/N
+3. Approve budget for Raven + Librarian to spike memory architecture (weeks 1–2)? Y/N
+
+---
