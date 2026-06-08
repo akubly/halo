@@ -22,10 +22,10 @@
 ---
 
 ## Codename Brainstorm — 2026-06-08
+- Pitched SDK-quality-lens codename candidates for the Synesthetic Familiar. Team converged on **PULSE** (4 agents). Official codename now VESPER (Aaron final selection). See orchestration-log.
 
-Pitched SDK-quality-lens codename candidates for the Synesthetic Familiar. Team converged on **PULSE** (4 agents independently nominated variants). Official project codename now PULSE. See `.squad/orchestration-log/2026-06-08T07-17Z-codename-brainstorm.md`.
-
----
+## Session 2026-06-08: VESPER BLE Wire-Format Lock — Endianness/Seq/Opcode/ACK Spec
+- Locked: LE endianness (ATT native, M55 native), signed-16 delta dedup (handles wraparound), opcode space (0x00–7F Device→Host, 0x80–FF Host→Device), FAMILIAR_ACK auto every 10 packets, FAMILIAR_RESET 0x01 Device→Host notification. Routed Juanita for test update.
 
 ## Current Session (2026-06-02): GitHub Landscape — Community SDK Wrappers & Libraries
 
@@ -102,3 +102,22 @@ See `.squad/agents/ng/ideation-pass2-2026-06-02.md`.
 **Favorite Story:** NG-T1-3 (consent-needed events) — It's the inflection point between "SDK feature" and "architectural pattern." Small enough to ship Week 1; forces entire consent pipeline design. Non-blocking events mean familiar keeps breathing while consent flows asynchronously. That's wearable computing done right.
 
 **Next Steps:** Aaron prioritization → GitHub issue decomposition → implementation assignment (likely split: SDK changes → upstream Brilliant, playground integration → Ng + demo authors).
+
+---
+
+## Learnings
+
+### 2026-06-08: VESPER BLE Wire-Format Finalization (§5.2)
+
+**Endianness:** Chose **little-endian** for all multi-byte fields. Rationale: BLE ATT layer is LE; ARM Cortex-M55 on Halo is LE; Python `struct '<'` and Lua `string.pack('<I2', ...)` both handle it natively. No guessing required — it's the hardware-native choice.
+
+**Sequence wraparound rule:** uint16 seq wraps 0xFFFF → 0x0000. Device applies a **signed 16-bit delta** comparison: `delta = (received_seq - last_accepted_seq) mod 65536`. If delta is 1–32767 (positive half of int16 space) → accept. If delta is 0 → duplicate, drop. If delta is 32768–65535 (negative half) → stale/out-of-order, drop. This is wraparound-safe for any realistic packet rate. On reconnect: host resets seq to 0x0000, device resets last_accepted_seq to 0xFFFF so delta=1 on first packet.
+
+**Opcode scheme:** Split at 0x80. Range `0x80–0xFF` = Host→Device commands; range `0x00–0x7F` = Device→Host notifications/ACKs. Current assignments: `0x80` = FAMILIAR_UPDATE (H→D), `0x01` = FAMILIAR_RESET (D→H, no payload), `0x02` = FAMILIAR_ACK (D→H, uint16 LE last_received_seq).
+
+**ACK cadence:** Device auto-sends FAMILIAR_ACK every 10 accepted FAMILIAR_UPDATE packets (~1 ACK/sec at 10Hz). No host-initiated request opcode needed — keeps protocol unidirectional for the common case. Also sends unsolicited ACK on BLE reconnect.
+
+**Wire format summary:**
+- FAMILIAR_UPDATE: 6 bytes (opcode, mood, intensity, confidence, seq LE)
+- FAMILIAR_ACK: 3 bytes (opcode, seq LE)
+- FAMILIAR_RESET: 1 byte (opcode only)

@@ -22,6 +22,9 @@
 - **SDK API surface survived 2 gens**: BLE communication pattern, Lua integration, camera/mic/display control remain stable. The churn is in **on-device event loop semantics**, not host SDK contracts.
 - **Brilliant is willing to break Lua APIs.** Frame→Halo forced rewrite of `frame_app.lua` across all users. This suggests SDKs should *not* over-invest in backward compat abstractions; velocity & clarity matter more. [https://raw.githubusercontent.com/brilliantlabsAR/brilliant_sdk/main/python/MIGRATION.md]
 
+## Session 2026-06-08: VESPER ARD Clarifications — 3 Decisions Locked
+- Amended ARD §3/§4/§5.2/§5.4: heap device-local, quick-reset device-originated, confidence-gating host-authority. All blocked on wire-format spec; routed Ng.
+
 ## Ideation 2026-06-02
 
 1. **Glasses as distributed compute mesh** — Multiple Halo wearers auto-discover and form a P2P cluster; each pair contributes CPU cycles for collective ML inference tasks (vision, language, reasoning) with the network coordinating work distribution and result synthesis.
@@ -158,3 +161,18 @@ Aaron has approved all 3 open decisions. ARD finalized with locked constraints.
 ## Codename Brainstorm — 2026-06-08
 
 Pitched architecture-lens codename candidates for the Synesthetic Familiar. Team converged on **PULSE** (4 agents independently nominated variants). Official project codename now PULSE. See `.squad/orchestration-log/2026-06-08T07-17Z-codename-brainstorm.md`.
+
+---
+
+## VESPER ARD Architecture Clarifications — 2026-06-08
+
+Post-test-strategy advisory review surfaced three ARD ambiguities. Resolved all three. Edits landed in `docs/projects/synesthetic-familiar/ARD.md`.
+
+### Learnings
+
+1. **Heap ownership is device-local.** The ARD already implied it (Lua monitors heap, reduces complexity at 80%, halts at 95%) but never made it explicit. Test Strategy drifted into a host/device heap-warning protocol the ARD never specified. Fix: add a single explicit statement in §5.1 and §5.2 — "Heap management is device-local; not reflected in any host-bound message." FAMILIAR_ACK stays seq-only. No new protocol surface needed. Lesson: when the ARD implies something strongly but doesn't state it, the Test Strategy will invent its own interpretation. State it.
+
+2. **Quick-reset is device-owned.** §3 labeled JUANITA-T2-5 as "Lua input" (on-device) while §5.2 listed `FAMILIAR_RESET` as Host→Device — a direct contradiction. Decision: double-tap detected on-device (Lua IMU/tap), device snaps to NEUTRAL immediately with no host round-trip. FAMILIAR_RESET flipped to Device→Host notification. Rationale: the wearer is correcting a bad inference in real-time; waiting for a host round-trip adds 100-300ms latency and fails if BLE is degraded. Device owns the reset; host can observe via notification. Ng inherits this direction for byte-level spec.
+
+3. **Confidence gating authority is the host alone.** §4 and §5.4 both said confidence gating lives on the host, but left ambiguity about whether device-side gating was also expected. Test Strategy added redundant device-side gating as "required" behavior. Fix: make explicit in §4 autonomy table and §5.4 bullets — host is the single authority; device-side gating is optional defense-in-depth only. Lesson: "authority" must be named explicitly when a concern could reasonably live in two places.
+

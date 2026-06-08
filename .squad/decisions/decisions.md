@@ -248,3 +248,94 @@ Aaron approved 3 critical architectural decisions for Synesthetic Familiar v1 (T
 **Next Step:** Week 1 "It moves" — Python host harness + Lua sprite render on Halo device.
 
 ---
+
+## 2026-06-08T07:03Z: Project codename — VESPER
+
+**Status:** DECIDED  
+**Owner:** Aaron Kubly  
+**Date:** 2026-06-08  
+**Related:** Theme-2 Synesthetic Familiar
+
+The "synesthetic-familiar" project's official codename is **VESPER**. Whole-team brainstorm produced candidates with team consensus at PULSE (4/9 agents) and other pitches including VESPER, EMBER, AURA, VEIL, ORACLE, CANARY, ECHO, GLIMMER, RESONANCE, GLOAM. Aaron selected VESPER for its twilight/peripheral-awareness resonance, strong naming hygiene (low OSS collision risk), distinctive pronunciation, and slug quality.
+
+**Scope note:** VESPER is the codename; "synesthetic-familiar" remains the descriptive project name and directory. No directory rename unless Aaron requests it.
+
+---
+
+## 2026-06-08: VESPER ARD Architecture Clarifications
+
+**Status:** DECIDED  
+**Owner:** Hiro (Architect)  
+**Date:** 2026-06-08  
+**Related:** Post-test-strategy advisory review
+
+Advisory review of VESPER ARD surfaced three ambiguities; Aaron approved fixes. All changes landed in `docs/projects/synesthetic-familiar/ARD.md`.
+
+**Decision 1: Heap Ownership — Device-Local**
+- Lua device monitors heap internally (80% → reduce complexity; 95% → safe-halt).
+- No heap state surfaced in host-bound messages. `FAMILIAR_ACK` carries `last_received_seq` only — no heap field.
+
+**Decision 2: Quick-Reset Ownership — Device-Originated**
+- Double-tap gesture detected and handled on-device (Lua IMU/tap input); device snaps to NEUTRAL immediately.
+- `FAMILIAR_RESET` direction is **Device → Host** (notification, not command).
+- Rationale: Wearer corrects bad inference in real-time. Host round-trip adds 100-300ms latency and fails under BLE degradation.
+
+**Decision 3: Confidence Gating Authority — Host Only**
+- Host is the single authority for confidence gating. If confidence < 0.7, host does not send update — period.
+- Device-side gating is optional defense-in-depth, not required behavior.
+
+---
+
+## 2026-06-08: VESPER BLE Wire-Format Specification
+
+**Status:** DECIDED  
+**Owner:** Ng (SDK Engineer)  
+**Date:** 2026-06-08  
+**Related:** ARD §5.2 wire format under-specified; test code invented endianness, seq wraparound, dedup policy, reset opcode
+
+Wire-format specification fully pinned to prevent Python host and Lua device drift.
+
+**1. Endianness: Little-endian (LE) for all multi-byte fields** (BLE ATT native, Cortex-M55 native).
+
+**2. Sequence Number: uint16, wraps 0xFFFF → 0x0000**
+- Host increments seq monotonically on each `FAMILIAR_UPDATE`; resets at reconnect.
+- Device dedup rule: `delta = (received_seq - last_accepted_seq) mod 65536`; interpret as signed 16-bit: delta 1–32767 = newer (accept), 0 = duplicate (drop), 32768–65535 = stale (drop).
+
+**3. Opcode Space: 0x00–0x7F Device→Host, 0x80–0xFF Host→Device**
+- `0x80` = `FAMILIAR_UPDATE` (Host→Device): opcode, mood_enum, intensity, confidence, seq [6B]
+- `0x02` = `FAMILIAR_ACK` (Device→Host): opcode, last_received_seq [3B]
+- `0x01` = `FAMILIAR_RESET` (Device→Host): opcode only [1B]
+
+**4. FAMILIAR_RESET: Device→Host only.** Device snaps to NEUTRAL on double-tap locally (Lua). Host does NOT send reset command.
+
+**5. FAMILIAR_ACK Cadence:** Auto every 10 accepted `FAMILIAR_UPDATE` packets (~1 ACK/sec @ 10Hz) + unsolicited on BLE reconnect.
+
+---
+
+## 2026-06-08: Test Strategy Rev 2 — Review Findings Closed
+
+**Status:** DECIDED  
+**Owner:** Juanita (Tester / QA)  
+**Date:** 2026-06-08  
+**Related:** TEST-STRATEGY.md Rev 1 advisory review (3 blocking, 7 important, 1 minor category)
+
+All 11 advisory review findings (3 blocking, 7 important, 1 minor) are closed in TEST-STRATEGY.md Rev 2.
+
+**Blocking Findings:**
+- **B1 — Heap Tests → Device Tier Only:** Heap management entirely device-local (Lua). No heap state on wire. `FAMILIAR_ACK` is seq-only. Rewritten as device-tier-only tests (busted + emulator).
+- **B2 — Wire Format:** All `>H` replaced with `<H` (LE). §6.6 rewritten with signed-16 delta window dedup. Explicit tests for duplicate/stale/wraparound. `FAMILIAR_RESET` = 0x01 Device→Host. `FAMILIAR_ACK` = auto every 10 packets, seq-only.
+- **B3 — False-Positive Bug in §4.2:** Single `FakeTransport()` instance used for both constructor and assertion. Code comment added documenting intent.
+
+**Important Findings:**
+- **I4 — Honest London-School Framing:** §1 updated with mixed-methodology table. Tell-Don't-Ask corrected: `FamiliarApp` orchestrates, not `inference.py`. Red guidance pre-stubs `FamiliarApp`.
+- **I5 — Decouple Acceptance from Heuristic:** All acceptance tests inject controlled `inference_fn`; sensor values stay in classicist unit tests (`test_inference.py`).
+- **I6 — Confidence Gating Ownership:** Device-side gating relabeled "optional defense-in-depth." Host is sole authority (ARD §5.4).
+- **I7 — Privacy/Jitter:** §6.8 added seeded-RNG seam; busted test asserts jitter 5–10%. §4.1 added: `encode_familiar_update` cannot accept raw sensor parameters.
+- **I8 — Lua Testing Authority:** `busted` declared authoritative Lua check. §7.3 rewritten: property tests must drive real Lua interpreter, not Python clone.
+- **I9 — Quick-Reset Seam:** JUANITA-T2-5 updated: "Device detects double-tap → Lua snaps to NEUTRAL locally; host receives FAMILIAR_RESET notification (0x01)."
+- **I10 — Story-Mapping Alignment:** YT-T2-2 replaced with baseline-adaptation behavior (ARD-grounded). RAVEN-T2-1 updated to acceptance (protocol) + manual (visual).
+
+**Minor Finding:**
+- **M11 — Appendix A Blockers:** Restructured into RESOLVED (R1–R7: endianness, ACK, seq, FAMILIAR_RESET, heap, confidence, quick-reset) and OPEN (7 items: emulator API, RNG seam, sprite format, baseline persistence, IMU interrupt). No review findings remain open.
+
+---
