@@ -109,3 +109,9 @@ See `.squad/agents/enzo/ideation-2026-06-02.md` for full brainstorm.
 7. **Ambient Wellness Coach** — Halo continuously monitors posture (via camera + IMU), breathing (via bone-conduction audio sensing), and vocal stress (pitch/tone). Before you realize you're stressed, it nudges you with a 3-second grounding exercise via voice (bone-conduction whispers instruction directly to you, not loud). Over a month, anxiety drops measurably; you build new neural pathways without "trying."
 
 8. **Expert Multiplier** — Point Halo at any problem (broken car part, infected plant, coding error on screen) and trigger "Expert Session." Noa connects you live to a human expert (community or paid) who sees *exactly* what you see in real-time, talks you through it step-by-step. First-expert-connection is free, then $0.50/min. Turns anyone into an expert on anything; expert market emerges on day 1.
+
+---
+
+## Codename Brainstorm — 2026-06-08
+
+Pitched product-lens codename candidates for the Synesthetic Familiar. Team converged on **PULSE** (4 agents independently nominated variants). Official project codename now PULSE. See `.squad/orchestration-log/2026-06-08T07-17Z-codename-brainstorm.md`.

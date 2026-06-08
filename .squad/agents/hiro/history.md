@@ -89,7 +89,7 @@ Authored the Architecture Requirements Document for **The Synesthetic Familiar**
 
 8. **Graceful degradation hierarchy**: mic+IMU → mic-only → IMU-only → hold-last-state → neutral. Device never freezes.
 
-### Key Open Questions for Aaron
+### Key Open Questions for Aaron (SUBMITTED 2026-06-07)
 
 1. **Host platform**: Python (recommended) vs. Web Bluetooth vs. Flutter?
 2. **Sensors for v1**: Mic+IMU (recommended) vs. Mic-only vs. +Camera?
@@ -109,3 +109,52 @@ OUT: Peer mood sharing, cross-device roaming, evolution over time, custom sprite
 - Week 1: "It moves" (sprite renders, BLE works)
 - Week 2: "It reacts" (mood inference live)
 - Week 3: "It's alive" (polish, UX, ship)
+
+---
+
+## Theme-2 ARD APPROVED — 2026-06-07
+
+Aaron has approved all 3 open decisions. ARD finalized with locked constraints.
+
+### Decisions Approved ✅
+
+**Decision 1: Sensors for v1** ✅ **MIC + IMU**
+- Camera deferred to Phase 2 (eliminates recording-indicator overhead for v1)
+- Mic captures on host phone; IMU relayed from device
+- Sufficient signal for stress/calm detection without camera privacy complexity
+
+**Decision 2: Mood Model** ✅ **LOCAL HEURISTIC (HOST PYTHON)**
+- No cloud calls in v1 (latency unacceptable for ambient display)
+- Local heuristic on host: pitch_variance (0.4) + acceleration (0.3) + rotation (0.3)
+- Cloud refinement deferred to Phase 2 for insights
+- Privacy: embodied signals stay on host+device
+
+**Decision 3: Creature Form** ✅ **ABSTRACT-WITH-EYES**
+- Geometric shape (no face, no mouth) with single bright eye
+- Eyes convey agency and attention direction without revealing state to bystanders
+- 24×24 sprite remains abstract enough to satisfy privacy (RAVEN-T2-1) while feeling "alive"
+- Full-face and particle-system alternatives rejected
+
+### Consequences Propagated
+
+- **Section 4**: Removed camera optionality; confirmed host=Python, device=Lua; local-only mood inference documented
+- **Section 5.3**: Locked Python desktop + Mic+IMU (no camera)
+- **Section 5.4**: Local heuristic approach documented concretely; no cloud fallback discussion
+- **Section 5.5**: Abstract-with-eyes form locked; eye-based render spec documented
+- **Section 5.6**: Privacy section simplified (no camera privacy concerns); mic indicator on phone-side confirmed
+- **Section 7**: Open decisions replaced with resolved decisions + alternatives-considered notes
+- **Section 8**: Risks/mitigations tightened (removed cloud failure; mic-noise handling added)
+- **Section 9**: Milestones tightened with exact technical scope (no if-then-decide language)
+
+### Ready to Build
+
+**Immediate next step:** Week 1 — "It moves" (Lua sprite on device + Python mock FAMILIAR_UPDATE)
+- Device: `main.lua` sprite animation loop (24×24 geometric form with eye)
+- Host: Python entry point + BLE connection harness
+- Success: Aaron sees creature bobbing on Halo, no jitter
+
+---
+
+## Codename Brainstorm — 2026-06-08
+
+Pitched architecture-lens codename candidates for the Synesthetic Familiar. Team converged on **PULSE** (4 agents independently nominated variants). Official project codename now PULSE. See `.squad/orchestration-log/2026-06-08T07-17Z-codename-brainstorm.md`.

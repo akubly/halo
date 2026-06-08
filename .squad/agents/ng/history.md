@@ -21,6 +21,12 @@
 
 ---
 
+## Codename Brainstorm — 2026-06-08
+
+Pitched SDK-quality-lens codename candidates for the Synesthetic Familiar. Team converged on **PULSE** (4 agents independently nominated variants). Official project codename now PULSE. See `.squad/orchestration-log/2026-06-08T07-17Z-codename-brainstorm.md`.
+
+---
+
 ## Current Session (2026-06-02): GitHub Landscape — Community SDK Wrappers & Libraries
 
 **Task:** Search GitHub for community SDK wrappers, BLE drivers, and Lua libraries. Assess production-readiness and recommend adoption/avoidance.
@@ -45,3 +51,54 @@
 ## Ideation 2026-06-02
 
 Raw blue-sky ideas for SDK tooling, debugging, community workflows. See `.squad/agents/ng/ideation-2026-06-02.md (no decisions promoted).
+
+---
+
+## Ideation Pass 2 2026-06-02
+
+Cross-pollinated ideation: resonance with Hiro's microservices topology + Librarian's world model. Four mash-ups synthesized:
+1. **Gyro-Paced Radial Time** (Ng #1 × Da5id #6) — IMU-responsive clock, first kinetic display control
+2. **Micro-Haptic Feedback** (Ng #3 × Y.T. #7) — Silent flicker-based haptics via gesture recognition
+3. **Episodic Lua Recorder** (Ng #2 × Librarian #7) — On-device tracking + host LLM stitching
+4. **Privacy-Aware Refresh** (Ng #7 × Raven #7) — Face-gating drives display power budget
+
+Three NEW cross-pollinated SDK patterns: sensor-fusion context primitive, event-priority backpressure queue, peer-to-peer Lua library CDN.
+
+See `.squad/agents/ng/ideation-pass2-2026-06-02.md`.
+
+---
+
+## User Stories Themes 1-2 — 2026-06-03
+
+**Task:** Author SDK developer-experience user stories through Ng's lens for Aaron's two chosen themes:
+1. **Theme 1 — Consent-Aware Memory** (most-cited convergence; privacy + usability)
+2. **Theme 2 — The Synesthetic Familiar** (fun + peripheral design + ambient mood)
+
+**Target Personas:**
+- Playground demo developer (forking + modifying existing Halo demos)
+- Test harness author (Juanita's spiritual successor; integration + chaos testing)
+- Lua-on-device developer (event loop authoring; sensor fusion loops)
+
+**Scope:** Surface hidden-but-required SDK primitives. Call out where `brilliant-ble` / `brilliant-msg` falls short. Map stories to BLE opcode gaps, Lua stdlib gaps, and infrastructure work.
+
+**Output:** `.squad/agents/ng/user-stories-themes-1-2-2026-06-03.md`
+
+**Key Findings:**
+- **Theme 1 (Consent-Aware Memory):** 5 stories authored. Viability HIGH; no hard blockers. Phase 1 includes consent context metadata (BLE), Lua event hooks, ledger query. Phase 2: pre-blur pipeline (requires image manipulation lib not yet in Brilliant SDK).
+- **Theme 2 (The Synesthetic Familiar):** 5 stories authored. Viability MEDIUM. Sprite rendering is straightforward; sensor fusion is ambitious. Phase 1: familiar state + mood animation + sprite upload. Phase 2: true on-device multi-modal fusion (requires M55 NPU TensorFlow Lite integration).
+
+**Stories Authored:** 10 total (5 per theme). Each story includes acceptance criteria + SDK notes revealing required API surface.
+
+**"SDK Doesn't Expose This Yet" Stories:**
+- NG-T1-5 (Pre-blur frame pipeline): Requires image processing library in Lua. New BLE opcode `FRAME_WITH_BLUR_MASK` + blur kernel not yet available.
+- NG-T2-5 (Sensor fusion context): Requires on-device ML models (scene understanding, emotion classification, gesture recognition) on M55 NPU. No `frame.ml.*` namespace yet.
+
+**Recommended Build Sequence:**
+- Phase 1a (1 wk): NG-T1-1, NG-T2-1 (consent context + familiar state)
+- Phase 1b (2 wk): NG-T1-2, NG-T1-3, NG-T2-2 (test harness + event hooks)
+- Phase 1c (1 wk): NG-T1-4, NG-T2-3, NG-T2-4 (ledger + sprite + testing)
+- Phase 2 (4+ wk): NG-T1-5, NG-T2-5 (pre-blur, on-device ML)
+
+**Favorite Story:** NG-T1-3 (consent-needed events) — It's the inflection point between "SDK feature" and "architectural pattern." Small enough to ship Week 1; forces entire consent pipeline design. Non-blocking events mean familiar keeps breathing while consent flows asynchronously. That's wearable computing done right.
+
+**Next Steps:** Aaron prioritization → GitHub issue decomposition → implementation assignment (likely split: SDK changes → upstream Brilliant, playground integration → Ng + demo authors).

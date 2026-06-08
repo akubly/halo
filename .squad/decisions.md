@@ -354,3 +354,124 @@ Aaron must confirm:
 3. Approve budget for Raven + Librarian to spike memory architecture (weeks 1–2)? Y/N
 
 ---
+
+## 2026-06-08
+
+### Testing Decision: London-School TDD for The Synesthetic Familiar
+
+| Field | Value |
+|-------|-------|
+| **Author** | Juanita (Tester / QA) |
+| **Date** | 2026-06-08 |
+| **Status** | PROPOSED — for team review |
+| **Scope** | Synesthetic Familiar test suite + any future BLE/host-device Python projects |
+| **Reference** | docs/projects/synesthetic-familiar/TEST-STRATEGY.md |
+
+---
+
+## Decision
+
+**Adopt London-school (mockist, outside-in) TDD as the test methodology for
+the Synesthetic Familiar, and recommend it as the default for all future
+host-device Python projects in this repo.**
+
+---
+
+## Rationale
+
+### Why London, not Detroit
+
+Detroit (classicist) TDD tests observable state: call a function, assert on
+return values. It works well for pure-function-heavy codebases where
+collaborators are stable or trivial.
+
+The Synesthetic Familiar is neither. It has four hard collaborators that
+cannot or should not be real in a test environment:
+
+1. **BLE transport** (`brilliant-ble`) — an external SDK over a physical radio.
+   Testing against a real BLE device means every host-side unit test requires
+   hardware, takes 10-30s to connect, and fails intermittently due to radio
+   flake. This is unacceptable for a fast-feedback test suite.
+
+2. **Sensor source** (mic + IMU) — hardware on the host phone and device relay.
+   Audio capture and IMU relay cannot be scripted without injection. We need
+   to drive the inference pipeline with specific `(rms, pitch_variance, accel,
+   rot)` values to test thresholds, confidence gating, and fallback paths.
+
+3. **The clock** — breathing interpolation (200-500ms), BLE timeout (10s →
+   neutral), and confidence-hold timing all depend on wall time. Without clock
+   injection, timing tests require `time.sleep()` — which is slow, fragile,
+   and CI-unfriendly.
+
+4. **The Lua render loop** — running on hardware we don't own during testing.
+   We cannot assert on pixel output without either an emulator or extracting
+   pure logic from the render loop.
+
+London school makes these collaborators visible as **ports**: named interfaces
+that test doubles plug into. This drives better architecture: `FamiliarApp`
+takes a `TransportPort`, a `SensorSourcePort`, and a `ClockPort` — injected,
+not hard-wired. The test suite naturally produces a dependency-injection
+architecture that is also easier to extend (swap mic → camera sensor source
+in Phase 2 without touching `inference.py`).
+
+### The Outside-In, Interface-Discovery Benefit
+
+Writing acceptance tests first before `FamiliarApp` exists forced interface
+discovery:
+- `run_cycle()` was named by a test, not a design meeting
+- The confidence gate belongs in the orchestrator (`run_cycle()`), not inside
+  `compute_mood()` — Tell-Don't-Ask is a natural consequence of mockist testing
+- The `FakeClock` requirement forced clock injection, which revealed that
+  `main.py` would otherwise have had `time.monotonic()` buried in its body
+
+### The Red→Green→Refactor Discipline
+
+This project is a 2-3 week playground demo. Without discipline, it will
+accumulate technical debt in the inference thresholds, the wire-format
+encoding, and the Lua state machine. Red→Green→Refactor makes the
+refactoring phase mandatory and safe: no production code is touched unless
+tests are green.
+
+---
+
+## Alternatives Considered
+
+| Alternative | Rejected? | Reason |
+|-------------|-----------|--------|
+| Detroit TDD (state-based) | Yes | BLE/sensor/clock collaborators make state-based testing impractical without real hardware |
+| No TDD (write tests after) | Yes | Inference thresholds and confidence gating are easy to get subtly wrong; tests-after miss the interface-discovery benefit |
+| Integration-first (emulator only) | No (kept for Tier 3) | Emulator tests are valuable but slow; not a replacement for fast unit/acceptance tests |
+
+---
+
+## Constraints & Caveats
+
+- The `halo-emulator` is described as "experimental" (Juanita history.md).
+  Integration tests at Tier 3 may have emulator gaps. Do not rely solely on
+  emulator for correctness; acceptance tests with FakeTransport are the
+  primary correctness gate.
+- Lua unit testing requires either `busted` (Lua test framework) or extracting
+  pure logic into a Python simulation. The team should confirm busted is
+  installable in CI before committing to it.
+- Three ARD gaps (heap API, FAMILIAR_ACK trigger, `on_imu_peak` polling)
+  create test blockers for specific stories. These are documented in
+  TEST-STRATEGY.md Appendix A and must be resolved before those stories
+  are considered testable.
+
+---
+
+### User Decision: Theme-2 ARD Open Decisions Resolved
+
+**By:** Aaron Kubly (via Copilot)  
+**Date:** 2026-06-08 (2026-06-08T0639Z)  
+**Status:** APPROVED
+
+Aaron approved all three of Hiro's ARD recommendations for the Synesthetic Familiar (Theme 2), first official Halo project:
+
+1. **Sensors for v1 = Mic + IMU** (no camera in v1 → no recording-indicator overhead)
+2. **Mood model = Local heuristic** (on-host, not cloud; cloud refinement deferred to Phase 2 — keeps the ambient illusion within latency budget)
+3. **Creature form = Abstract-with-eyes** (a simple bright eye reads "alive" without broadcasting the wearer's emotional state to bystanders)
+
+**Why:** User decision on the three forks Hiro parked in ARD section 7. These are now LOCKED — the ARD moves from DRAFT to APPROVED. Build work can proceed against these constraints.
+
+---
