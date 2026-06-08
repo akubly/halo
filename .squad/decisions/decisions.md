@@ -216,24 +216,35 @@ Implementation: Create `playground/templates/{python,web,flutter}/` with scaffol
 
 ---
 
-## 2026-06-07: Theme-2 Synesthetic Familiar — 3 Decisions Pending Aaron
-**Status:** PROPOSED (awaiting Aaron decision)  
-**Owner:** Hiro (Architect), Aaron (decision gate)  
+## 2026-06-07: Theme-2 Synesthetic Familiar — 3 Key Decisions Locked by Aaron
+**Status:** APPROVED  
+**Owner:** Hiro (Architect), Aaron (final decision)  
 **Date:** 2026-06-07  
+**Approval Date:** 2026-06-07  
 **Related:** Theme-2 Synesthetic Familiar ARD (2026-06-07)
 
-Three open architectural decisions are documented in `docs/projects/synesthetic-familiar/ARD.md` Section 7. They are NOT locked and require Aaron's explicit approval:
+Aaron approved 3 critical architectural decisions for Synesthetic Familiar v1 (Theme-2 first official Halo playground project). These decisions are now LOCKED and drive the Week 1–3 milestone sequence.
 
-1. **Host Platform Choice** — Python (desktop/server host), Web Bluetooth (phone browser host), or Flutter (native mobile app host). Each has latency/sensor-access tradeoffs.
+**Decision 1: Sensors for v1 — Mic + IMU (LOCKED)**
+- Mic + IMU provides good inference signal for stress/calm detection (voice tone + motion)
+- No camera in v1 eliminates privacy overhead and complexity
+- Rationale: Proven sufficient for v1 "feels alive" bar; camera deferred to Phase 2
 
-2. **Sensors for v1** — Mic+IMU (full design), Mic-only (simplified, confidence caps), or +Camera (requires permission model, host processing).
+**Decision 2: Mood Model — Local Heuristic (LOCKED)**
+- Local heuristic on host (no cloud for v1)
+- Rationale: Latency (200-500ms local vs. 500-2000ms cloud) essential for ambient display; privacy (no telemetry); reliability (no network dependency)
+- Cloud refinement deferred to Phase 2
 
-3. **Model Location** — Local heuristic (fast, limited accuracy), Cloud API (accurate but latency-sensitive), or hybrid (fallback chain).
+**Decision 3: Creature Form — Abstract-with-Eyes (LOCKED)**
+- Abstract geometric form with single bright eye (no face, no anthropomorphic features)
+- Rationale: Recognizable as creature but abstract enough that bystanders cannot read wearer internal state; preserves privacy (RAVEN-T2-1)
 
-4. **Creature Form** — Abstract-with-eyes (current design), full face with emotion landmarks, or particle system.
+**Consequences:**
+- ARD now build-ready (status APPROVED in docs/projects/synesthetic-familiar/ARD.md)
+- Phase 1 milestone sequence locked: Week 1 "It moves" (render loop), Week 2 "It reacts" (host inference), Week 3 "It's alive" (UX + polish)
+- Tech stack finalized: Python 3.11 host + Lua device render + local heuristic (no cloud, no ML framework)
+- Privacy by abstraction confirmed (abstract visuals, no biometric leak, on-device inference)
 
-5. **Evolution Scope** — No evolution (static Familiar), simple growth over 30 days, or full evolution loop.
-
-**For Aaron:** Review ARD Section 7 (pages 16-19) for Hiro's analysis of each option (tradeoffs, implementation complexity, privacy implications). Record final choices in separate decision entries once approved.
+**Next Step:** Week 1 "It moves" — Python host harness + Lua sprite render on Halo device.
 
 ---

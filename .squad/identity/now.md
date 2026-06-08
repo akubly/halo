@@ -1,27 +1,29 @@
 ---
-updated_at: 2026-06-08T06:15:43Z
+updated_at: 2026-06-08T06:39:00Z
 focus_area: First official project (Synesthetic Familiar, Theme-2)
 active_issues: []
+status: ARD APPROVED — Build-ready for Week 1
 ---
 
 # What We're Focused On
 
 **First official Halo project:** Synesthetic Familiar (Theme-2).
 
-**ARD drafted** at `docs/projects/synesthetic-familiar/ARD.md` (status DRAFT, pending Aaron approval).
+**ARD APPROVED** at `docs/projects/synesthetic-familiar/ARD.md` (status APPROVED, finalized 2026-06-07).
 
-**Architecture shape locked:**
-- Host (Python) mood inference from mic+IMU at 10Hz
+**3 Decisions LOCKED by Aaron:**
+1. **Sensors:** Mic + IMU (no camera in v1)
+2. **Model:** Local heuristic on host (no cloud for v1)
+3. **Creature form:** Abstract-with-eyes (geometric + eye, privacy-preserving)
+
+**Build-Ready Architecture:**
+- Host (Python 3.11) mood inference from mic+IMU at 10Hz
 - Device (Lua) renders 24×24 breathing sprite
 - BLE protocol: 6-byte FAMILIAR_UPDATE opcode (mood, intensity, confidence, sequence)
-- Privacy by abstraction: abstract visual language, no labeled emotions, visual jitter
-- 8 architectural decisions locked (host-peripheral model, autonomy tier, mood/render decoupling, confidence gating, privacy model, BLE format, display budget, graceful degradation)
+- Privacy by abstraction: abstract visual language, no labeled emotions, 5-10% visual jitter
+- Tech stack finalized: Python + `sounddevice` + `numpy` + Lua 5.3 (no external models, no cloud)
 
-**Next gate:** Aaron reviews ARD Section 7 for 3 pending decisions:
-1. Host platform (Python / Web Bluetooth / Flutter)
-2. Sensors (Mic+IMU / Mic-only / +Camera)
-3. Model location (Local / Cloud / Hybrid)
-4. Creature form (Abstract-with-eyes / Full face / Particles)
-5. Evolution scope (None / Simple growth / Full)
-
-Once Aaron decides → Hiro Phase 1a (mood inference) + Phase 1b (device rendering)
+**Next step:** Week 1 "It moves" — Python host harness + Lua sprite render on Halo device.
+- Week 1: Creature bobbing, BLE protocol working
+- Week 2: Host captures mic+IMU, mood inference active
+- Week 3: UX polish, onboarding, attention moments, graceful fallback
