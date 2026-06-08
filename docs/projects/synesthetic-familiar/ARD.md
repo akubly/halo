@@ -1,0 +1,506 @@
+# Architecture Requirements Document: The Synesthetic Familiar
+
+| Field | Value |
+|-------|-------|
+| **Status** | DRAFT — pending Aaron approval |
+| **Date** | 2026-06-07 |
+| **Owner** | Hiro (Architect) |
+| **Source** | Theme-2 user stories + ideation pass 2 |
+| **Project Type** | Playground demo (throwaway-OK) |
+
+---
+
+## 1. Overview & Goal
+
+**What it is:** A tiny reactive creature living in the wearer's peripheral vision on Halo's 256×256 round monocular display. Its form and motion mirror the wearer's internal state—stress, calm, attention—inferred from mic, IMU, and optionally camera. No numbers, no metrics, no literal UI. A companion that breathes faster when you're stressed, settles when you're calm, reacts when something notable happens.
+
+**One-sentence thesis:** The Familiar is a felt metric, not a stat—a friend who shows how you're doing through motion, not words.
+
+**Success bar:** "Feels alive, not a metric display." The wearer glances up and *understands* their internal state without reading anything. After 7 days, the creature feels like a companion, not a widget.
+
+**Convergence citation:** Four agents independently landed on "shared experience, not metrics":
+- Y.T. #1 (Pet Familiar): "reactive creature in corner vision"
+- Librarian #2 (Synesthetic AI): "abstract concepts as visual metaphors"
+- Da5id pass-2 mashup: "the creature becomes a felt metric, not a stat"
+- Enzo-T2-*: "the familiar isn't productive; it's relational"
+
+---
+
+## 2. Scope
+
+### IN SCOPE (Phase 1 — buildable in 2-3 weeks)
+
+1. **Idle/ambient behavior** — creature rests in peripheral vision with gentle breathing animation (DASID-T2-1)
+2. **Stress/calm state reflection** — creature breathing, color, and edge-fraying respond to inferred mood (DASID-T2-2, DASID-T2-3, LIBRARIAN-T2-1)
+3. **First-launch bonding** — onboarding flow that introduces the creature and its meaning (YT-T2-1)
+4. **Attention moments** — creature "jumps" or reacts when something significant happens (DASID-T2-4)
+5. **Host-driven mood inference** — mood computed on host app from mic + IMU, sent to device via BLE (NG-T2-1)
+6. **Quick-reset gesture** — double-tap to tell creature "I'm actually fine" (JUANITA-T2-5)
+7. **Graceful degradation** — creature doesn't freeze if sensors fail or BLE drops (HIRO-T2-2, JUANITA-T2-2)
+8. **Privacy by design** — creature animation is abstract/opaque to bystanders (RAVEN-T2-1)
+
+### OUT OF SCOPE (Phase 2+ / explicitly not building)
+
+| Feature | Why deferred | Source |
+|---------|--------------|--------|
+| On-device sensor fusion (true ML) | Requires M55 NPU TensorFlow Lite integration; months of work | NG-T2-5 |
+| Peer-to-peer mood sharing | Requires BLE mesh + encryption layer; distracts from v1 | LIBRARIAN-T2-4, RAVEN-T2-2 |
+| Cross-device roaming profile | Requires sync layer + device attestation | HIRO-T2-3 |
+| Evolution over time (growth) | Week-long baseline learning needed; adds complexity | YT-T2-4, LIBRARIAN-T2-5 |
+| Custom sprite upload (community remix) | SDK sandbox needed; Phase 2 community feature | NG-T2-3, LAGOS-T2-1 |
+| Personality sliders (sleepy vs. energetic) | Requires preference storage; polish feature | YT-T2-3 |
+| Distributed mood computation (multiplayer) | Consensus + sync; research project | HIRO-T2-4 |
+
+**Playground = throwaway-OK:** This is a demo, not production infrastructure. If something doesn't ship cleanly in 2-3 weeks, defer it.
+
+---
+
+## 3. User Stories Traceability
+
+### Phase 1 Stories (committed)
+
+| Story ID | Title | Component | Priority |
+|----------|-------|-----------|----------|
+| DASID-T2-1 | Idle Familiar — peripheral companion | Lua render, HUD | P0 |
+| DASID-T2-2 | Stress State — breathing faster, fraying | Lua render | P0 |
+| DASID-T2-3 | Calm State — settles and glows | Lua render | P0 |
+| DASID-T2-4 | Attention Moment — creature leaps | Lua render | P1 |
+| DASID-T2-5 | Bystander perception — friendly, not surveillance | Design constraint | P0 |
+| LIBRARIAN-T2-1 | Show internal state without asking | Host inference | P0 |
+| LIBRARIAN-T2-2 | Learn wearer baseline | Host inference | P1 |
+| LIBRARIAN-T2-5-ERROR | Don't hallucinate mood (silence > wrong) | Confidence gating | P0 |
+| YT-T2-1 | First launch — meet your Familiar | Host app UX | P0 |
+| YT-T2-2 | Notice stress before wearer feels it | Host inference | P1 |
+| NG-T2-1 | Drive animation from host sensor data | BLE/SDK | P0 |
+| NG-T2-2 | On-device sensor events (IMU peak) | Lua hooks | P1 |
+| JUANITA-T2-1 | Animation graceful degradation | Lua render | P1 |
+| JUANITA-T2-2 | Offline mode when cloud fails | Host inference | P0 |
+| JUANITA-T2-3 | Lua heap exhaustion handling | Lua runtime | P2 |
+| JUANITA-T2-5 | Quick-reset gesture | Lua input | P1 |
+| RAVEN-T2-1 | Abstract visuals — no biometric leak | Design constraint | P0 |
+| HIRO-T2-1 | Mood/render decoupling | Architecture | P0 |
+| HIRO-T2-2 | Graceful sensor degradation | Architecture | P0 |
+| ENZO-T2-1 | Mood mirror for remote workers | Product validation | P0 |
+| ENZO-T2-2 | Social barometer for anxious/ND wearers | Product validation | P1 |
+
+### Deferred Stories (Phase 2+)
+
+| Story ID | Reason |
+|----------|--------|
+| YT-T2-3, YT-T2-4, YT-T2-5 | Personality/evolution/surprises require baseline learning |
+| NG-T2-3, NG-T2-4 | Sprite upload + test harness are Phase 2 polish |
+| NG-T2-5 | True sensor fusion requires ML infrastructure |
+| LIBRARIAN-T2-4, LIBRARIAN-T2-5 | Peer sharing + growth are Phase 2 |
+| HIRO-T2-3, HIRO-T2-4 | Cross-device sync + distributed mood are research |
+| RAVEN-T2-2, RAVEN-T2-3 | Privacy audit tooling is Phase 2 |
+| LAGOS-T2-* | Licensing/lineage tooling is Phase 2 |
+| ENZO-T2-3, ENZO-T2-4, ENZO-T2-5 | Habit celebration, learning, grief are Phase 2+ |
+
+---
+
+## 4. System Architecture
+
+### Host-Peripheral Model
+
+**CRITICAL:** Halo is a peripheral, not an OS. The host app (phone/laptop/browser) drives logic; the device runs a thin Lua render loop. This is non-negotiable per Brilliant's architecture.
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                           HOST APP (Python)                          │
+│  ┌──────────────┐   ┌─────────────────┐   ┌───────────────────────┐ │
+│  │ Sensor Input │   │ Mood Inference  │   │ Familiar State        │ │
+│  │ (mic + IMU)  │──▶│ (local heuristic│──▶│ { mood, intensity,    │ │
+│  │              │   │  or cloud API)  │   │   confidence }        │ │
+│  └──────────────┘   └─────────────────┘   └───────────┬───────────┘ │
+└───────────────────────────────────────────────────────┼─────────────┘
+                                                        │ BLE
+                                                        ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                      HALO DEVICE (Lua on M55)                        │
+│  ┌───────────────────┐   ┌─────────────────┐   ┌─────────────────┐  │
+│  │ BLE Rx            │   │ Familiar State  │   │ Sprite Renderer │  │
+│  │ (mood updates)    │──▶│ Machine         │──▶│ (24×24 sprite,  │  │
+│  └───────────────────┘   │ (smooth interp) │   │  breathing, bob)│  │
+│                          └─────────────────┘   └────────┬────────┘  │
+│  ┌───────────────────┐                                  │           │
+│  │ Local IMU Events  │──────────────────────────────────┘           │
+│  │ (motion peaks)    │  (optional: supplement host mood)            │
+│  └───────────────────┘                                              │
+│                                    │                                │
+│                                    ▼                                │
+│                          ┌─────────────────┐                        │
+│                          │ 256×256 OLED    │                        │
+│                          │ (round viewport)│                        │
+│                          └─────────────────┘                        │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Data Flow (per cycle, 10Hz)
+
+1. **Host captures** mic audio + IMU from phone (or Halo BLE relay)
+2. **Host computes** mood vector: `{ energy: 0-1, valence: 0-1, tension: 0-1 }`
+3. **Host applies** confidence gate: if confidence < 0.7, hold current state
+4. **Host sends** BLE message: `FAMILIAR_UPDATE { mood_enum, intensity, confidence }`
+5. **Device receives** message, interpolates to new state over 200-500ms
+6. **Device renders** sprite at 15-30fps, updates breathing/color/position
+7. **Device optionally** supplements with local IMU peak events (jump-on-motion)
+
+### Autonomy Tier Decision
+
+**Tier: Hybrid Host-Primary**
+
+| Component | Location | Rationale |
+|-----------|----------|-----------|
+| Sensor capture | Host (phone mic/IMU) or device relay | Phone has better mic; device IMU is supplementary |
+| Mood inference | **Host** | M55 NPU is for gate-keeping, not inference (LIBRARIAN finding). Latency budget 200-500ms acceptable. |
+| Confidence gating | **Host** | "Silence is safer than wrong" (LIBRARIAN-T2-5-ERROR) |
+| State interpolation | **Device** | Smooth animation must be local; BLE latency too high |
+| Sprite rendering | **Device** | Display is on-device; Lua render loop |
+| Fallback on BLE drop | **Device** | Local IMU-only inference, then neutral state after 10s |
+
+**Why not on-device ML?** The M55 NPU is optimized for wake-word detection and simple gating, not real-time multimodal inference. Brilliant's own architecture keeps LLM on host/cloud. We follow suit. Phase 2 can explore on-device models if NPU proves capable.
+
+---
+
+## 5. Component Requirements
+
+### 5.1 On-Device (Lua)
+
+**File:** `main.lua` (≈300 lines)
+
+**Responsibilities:**
+- Receive `FAMILIAR_UPDATE` messages via BLE
+- Interpolate mood state smoothly (200-500ms transitions)
+- Render sprite at 15-30fps depending on complexity
+- Handle local IMU events (`on_imu_peak`) for motion-triggered reactions
+- Manage graceful degradation: if no BLE update for 10s, enter neutral state
+- Respect heap budget: <80% usage triggers reduced animation complexity
+
+**Sprite specification (per DASID-T2-1):**
+- Size: 24×24 pixels (expandable to 48×48 in Phase 2)
+- Position: 7 o'clock on rim, 80% radius from center
+- Palette: 4 colors (dark body, bright eye, accent, shadow)
+- Idle animation: bob ±2px at 0.25Hz (4-second cycle)
+- Lit pixels: ~1.5% of canvas (well under 30% budget)
+
+**State machine:**
+```
+NEUTRAL (default) ─┬─▶ CALM (low tension, sustained 60s)
+                   └─▶ STRESSED (high tension, threshold breach)
+                   └─▶ ATTENTION (event triggered, 500ms)
+```
+
+**SDK gaps to address (per NG-T2-*):**
+- Need `frame.on_imu_peak(callback)` for motion events (current SDK is polling-only)
+- Need sprite animation sequencing primitive (workaround: pre-baked keyframes)
+- Need heap monitoring: `frame.system.get_heap_usage()`
+
+**Frame→Halo gotchas (per decisions.md):**
+- Call `frame.display.power_save(false)` at startup
+- Use `upload_stdlua_libs()` to ensure wire format compatibility
+- IMU values are float32, not int16 — handle correctly
+
+### 5.2 BLE / SDK Layer
+
+**Message types needed:**
+
+| Direction | Message | Payload | Frequency |
+|-----------|---------|---------|-----------|
+| Host → Device | `FAMILIAR_UPDATE` | mood_enum (4 states), intensity (0-100), confidence (0-100) | 10Hz max |
+| Device → Host | `FAMILIAR_ACK` | last_received_seq | On request |
+| Host → Device | `FAMILIAR_RESET` | (none) | On gesture |
+
+**Wire format (fits in single BLE packet):**
+```
+FAMILIAR_UPDATE:
+  byte 0: opcode (0x80)
+  byte 1: mood_enum (0=neutral, 1=calm, 2=stressed, 3=attention)
+  byte 2: intensity (0-100)
+  byte 3: confidence (0-100)
+  byte 4-5: sequence number (uint16)
+```
+
+**SDK packages:**
+- `brilliant-ble` (Python): BLE connection, message transport
+- `brilliant-msg` (Python): Message encoding/decoding
+- **Version pinning:** Use latest stable; test for wire format compatibility
+
+**Known gaps:**
+- No `FAMILIAR_UPDATE` opcode exists — must define custom message type
+- No sprite animation primitive — Lua must implement keyframe logic
+
+### 5.3 Host App
+
+**Platform choice: Python desktop (reference implementation)**
+
+**Rationale:**
+- Python is Brilliant's "testing reference implementation" per decisions.md
+- Fastest iteration for playground demo
+- Emulator-first testing possible
+- Web Bluetooth is Chromium-only (limits audience)
+- Flutter requires mobile device (adds friction for devs)
+
+**Structure:**
+```
+synesthetic-familiar/
+├── host/
+│   ├── main.py              # Entry point, BLE connection
+│   ├── sensors.py           # Mic capture, IMU relay
+│   ├── inference.py         # Mood calculation
+│   └── familiar_protocol.py # FAMILIAR_UPDATE encoding
+├── device/
+│   ├── main.lua             # On-device render loop
+│   └── sprites/             # Sprite assets
+└── tests/
+    ├── test_inference.py    # Unit tests for mood calculation
+    └── test_protocol.py     # BLE message tests
+```
+
+**Sensor capture:**
+- Mic: PyAudio or sounddevice, 16kHz, mono
+- IMU: Relay from Halo via BLE (existing SDK support)
+
+**Dependencies:**
+- `brilliant-ble` (BSD-3-Clause, compatible)
+- `brilliant-msg` (BSD-3-Clause, compatible)
+- `numpy` (BSD, for signal processing)
+- `sounddevice` (MIT, for mic capture)
+
+### 5.4 AI / Mood Inference
+
+**Model tier: Local heuristic (no cloud for v1)**
+
+**Rationale:**
+- Latency budget is 200-500ms — cloud round-trip adds 500-2000ms
+- Familiar is always-on ambient display — can't depend on network
+- Privacy: embodied signals (voice, movement) should not leave device
+- Simplicity: heuristic is sufficient for "feels alive" bar
+
+**Inference pipeline:**
+```python
+def compute_mood(audio_rms, audio_pitch_variance, imu_acceleration, imu_rotation):
+    """
+    Returns: { mood: str, intensity: float, confidence: float }
+    """
+    tension = weighted_sum(
+        audio_pitch_variance * 0.4,  # High pitch variance = stress
+        imu_acceleration * 0.3,       # Fast movement = arousal
+        imu_rotation * 0.3            # Head turning = alertness
+    )
+    
+    if tension > STRESS_THRESHOLD:
+        return { "mood": "stressed", "intensity": tension, "confidence": 0.8 }
+    elif tension < CALM_THRESHOLD:
+        return { "mood": "calm", "intensity": 1 - tension, "confidence": 0.8 }
+    else:
+        return { "mood": "neutral", "intensity": 0.5, "confidence": 0.6 }
+```
+
+**Confidence gating (LIBRARIAN-T2-5-ERROR):**
+- If confidence < 0.7, do NOT update Familiar state
+- Better to show stale-but-correct than fresh-but-wrong
+- "Silence is safer than hallucination"
+
+**Baseline learning (Phase 1 simplified):**
+- First 3 days: use population defaults
+- After day 3: compute wearer's personal mean/stddev
+- Stress threshold = personal_mean + 1.5σ
+
+**Fallback (JUANITA-T2-2):**
+- If mic fails: use IMU-only (reduced confidence)
+- If IMU fails: use mic-only (reduced confidence)
+- If both fail: hold last-known state for 10s, then neutral
+
+### 5.5 HUD / Render
+
+**Display constraints (per decisions.md):**
+- 256×256 round viewport
+- OLED: black pixels = zero power
+- Lit pixel budget: <30% (aim for <5% for Familiar idle)
+- Refresh: 25-30fps baseline; 15fps for power-efficient idle
+- No double-buffer: incremental updates only
+
+**Visual specification (per DASID-T2-*):**
+
+| State | Animation | Color | Breathing | Lit % |
+|-------|-----------|-------|-----------|-------|
+| Neutral | Slow bob, 0.25Hz | Cool (blue/teal) | 4s cycle | ~1.5% |
+| Calm | Slower bob, 0.15Hz, halo glow | Cool teal | 7s cycle | ~3% |
+| Stressed | Fast bob, 0.75Hz, edge fraying | Warm amber/orange | 1.3s cycle | ~2.5% |
+| Attention | Jump 15px toward center, return | Bright (white eye) | — | ~2% peak |
+
+**Rendering primitives:**
+- `bitmap()` for indexed sprite (4-bit, 24×24)
+- `circle()` for halo glow (3 concentric, decreasing brightness)
+- `set_pixel()` for edge fraying (border noise)
+
+**Animation budget:**
+- Max 50ms per frame (20fps floor)
+- Max 32 sprites per frame (complexity limit per HIRO-T2-5)
+- Battery: <5mW target during idle
+
+### 5.6 Privacy
+
+**Privacy requirements (per RAVEN-T2-*):**
+
+1. **Abstract visuals:** Creature animation uses breathing/orbit/bloom — no labeled emotions visible to bystanders. "Calm" text is internal; bystander sees unlabeled motion.
+
+2. **No biometric leak:** Visual pattern includes 5-10% random jitter to prevent statistical inference of wearer state by observers.
+
+3. **On-device inference:** Mood calculation runs on host app; raw audio/IMU never leaves the host→device BLE pipe. No cloud telemetry of embodied signals.
+
+4. **Recording indicator mandate (decisions.md):** If camera or mic is used, recording indicator must be active. For Familiar v1, mic is captured on host phone, not Halo — indicator is on phone, not glasses.
+
+5. **BLE privacy:** FAMILIAR_UPDATE messages contain only mood enum + intensity — no raw biometric values. Message is not encrypted (low sensitivity), but also not broadcast (point-to-point BLE).
+
+**Privacy audit checklist:**
+- [ ] No raw audio samples leave host app
+- [ ] No IMU streams stored persistently
+- [ ] FAMILIAR_UPDATE contains no PII
+- [ ] Creature animation is abstract (no emotion labels visible)
+- [ ] Phone mic indicator active during capture
+
+---
+
+## 6. Tech Stack & Dependencies
+
+| Layer | Technology | Version | License |
+|-------|------------|---------|---------|
+| Host app | Python 3.11+ | — | — |
+| BLE SDK | `brilliant-ble` | latest | BSD-3-Clause |
+| Message SDK | `brilliant-msg` | latest | BSD-3-Clause |
+| Audio capture | `sounddevice` | 0.4+ | MIT |
+| Signal processing | `numpy` | 1.24+ | BSD |
+| On-device | Lua 5.3 | bundled | MIT |
+| Display | Halo OLED (256×256) | — | — |
+| Model | Local heuristic | — | N/A (no external model) |
+
+**License posture (per Lagos):**
+- Repo: MIT (most permissive)
+- Dependencies: All BSD-3 or MIT (compatible)
+- No copyleft (GPL/AGPL) dependencies
+- Attribution: README credits Brilliant Labs
+
+---
+
+## 7. Open Decisions (NEEDS AARON)
+
+### Decision 1: Host Platform — Python vs. Web Bluetooth
+
+**Options:**
+| Option | Pros | Cons |
+|--------|------|------|
+| **A: Python desktop (RECOMMENDED)** | Fastest iteration; emulator-first testing; Brilliant's reference SDK; no browser limitations | Requires Python install; less demo-friendly |
+| B: Web Bluetooth (browser) | Zero-install demo; runs in Chromium | Chromium-only; no Firefox/Safari; BLE reliability issues in browser |
+| C: Flutter mobile | Real mobile app; full sensor access | Requires mobile device; longer dev cycle |
+
+**Recommendation:** Python desktop. It's a playground demo for devs, not a consumer product. Python is the "gold standard" per decisions.md. We can port to Web later if the concept proves out.
+
+**Anti-anchor:** If Aaron wants maximum demo reach (show at meetups without Python install), Web Bluetooth is viable. Evidence that would change my recommendation: "We need non-technical people to try this immediately."
+
+### Decision 2: Sensors for v1 — Mic-only vs. Mic+IMU vs. +Camera
+
+**Options:**
+| Option | Inference quality | Privacy complexity | Dev effort |
+|--------|-------------------|-------------------|------------|
+| **A: Mic + IMU (RECOMMENDED)** | Good (voice tone + motion) | Low (no video) | Medium |
+| B: Mic-only | Moderate (voice tone only) | Very low | Low |
+| C: Mic + IMU + Camera | Excellent (full multimodal) | High (camera triggers privacy mandates) | High |
+
+**Recommendation:** Mic + IMU. Camera adds privacy overhead (recording indicator mandate) and complexity. Mic + IMU gives sufficient signal for "alive" feeling. Camera is Phase 2.
+
+**Anti-anchor:** If initial testing shows mic-only is sufficient for stress detection, we could simplify to mic-only and drop IMU relay complexity.
+
+### Decision 3: Cloud vs. Local Mood Model
+
+**Options:**
+| Option | Latency | Privacy | Quality |
+|--------|---------|---------|---------|
+| **A: Local heuristic (RECOMMENDED)** | <100ms | Excellent (no data leaves device) | Sufficient |
+| B: Cloud API (Gemini) | 500-2000ms | Reduced (audio to cloud) | Excellent |
+| C: Hybrid (local fast, cloud refine) | 100ms + 2000ms | Moderate | Best |
+
+**Recommendation:** Local heuristic. The Familiar is always-on ambient display — cloud latency breaks the "alive" illusion. We can add cloud refinement in Phase 2 for insights.
+
+### Decision 4: How Literal vs. Abstract is the Creature?
+
+**Options:**
+| Option | Description | Risk |
+|--------|-------------|------|
+| **A: Abstract (RECOMMENDED)** | Geometric shape, breathing, color shifts — no face, no eyes, no anthropomorphic features | May feel less "alive" |
+| B: Creature with face | Simple eyes + mouth, recognizable as animal | May feel too literal; bystanders can read emotions |
+| C: Particle system | Emergent swarm behavior, no single entity | May feel too impersonal |
+
+**Recommendation:** Abstract with eyes. The 24×24 sprite with a simple bright eye (per DASID) strikes the balance: recognizable as "creature" but not literal enough to broadcast emotions. Eyes add life without revealing state.
+
+### Decision 5: Scope of "Evolution Over Time" for Phase 1
+
+**Options:**
+| Option | Scope | Dev effort |
+|--------|-------|------------|
+| **A: No evolution (RECOMMENDED)** | Creature looks same on day 1 and day 30 | None |
+| B: Simple growth | Size increases from 24px to 32px after 7 days | Low |
+| C: Full evolution (YT-T2-4) | New animations, colors, features unlock over weeks | High |
+
+**Recommendation:** No evolution in Phase 1. It requires baseline learning and persistent state — complexity we don't need to prove "it's alive." Add evolution in Phase 2 if bonding happens.
+
+---
+
+## 8. Risks & Mitigations
+
+| Risk | Likelihood | Impact | Mitigation |
+|------|------------|--------|------------|
+| **Emotion inference lag** — creature shows stress 5s after wearer feels it | Medium | Medium | Use 10Hz update rate; tune thresholds for responsiveness over precision (LIBRARIAN-T2-5-ERROR: false negatives > false positives) |
+| **Display can't keep up** — animation stutters under load | Low | Medium | Frame-skip gracefully (JUANITA-T2-1); cap at 15fps if needed; bound animation complexity to 32 sprites |
+| **Model unavailable** — cloud API fails (if we use it) | Low (v1 is local) | High | Local-only for v1; fallback to IMU-only heuristic; hold last-known state |
+| **State leaks to bystanders** — creature reveals wearer stress visibly | Medium | High | Abstract visuals (RAVEN-T2-1); add 5-10% jitter; cap brightness at 50% indoors |
+| **Lua heap fills** — long session OOMs device | Low | High | Monitor heap at 80%; reduce animation complexity; safe-halt at 95% (JUANITA-T2-3) |
+| **BLE drops mid-session** — creature freezes | Medium | Medium | Device-side timeout (10s); local IMU fallback; graceful neutral state |
+| **Mood hallucination** — creature thrashes when wearer is calm | Medium | Medium | Confidence gating (LIBRARIAN); quick-reset gesture (JUANITA-T2-5); baseline learning |
+
+---
+
+## 9. Milestones
+
+**Phase 1 Build Sequence (2-3 weeks)**
+
+| Week | Milestone | Deliverable |
+|------|-----------|-------------|
+| **Week 1** | **"It moves"** | Lua sprite renders on device; host sends mock FAMILIAR_UPDATE; creature bobs |
+| Week 1 | BLE protocol | FAMILIAR_UPDATE message defined and working |
+| **Week 2** | **"It reacts"** | Host captures mic + IMU; mood inference pipeline; creature reflects mood |
+| Week 2 | Stress/calm states | Visual states per DASID spec (breathing speed, color shift) |
+| **Week 3** | **"It's alive"** | First-launch UX; attention moments; quick-reset; graceful degradation |
+| Week 3 | Polish + test | Test on real device; tune thresholds; document |
+
+**Success criteria for each milestone:**
+- Week 1: Aaron can see creature bobbing on Halo display
+- Week 2: Aaron can trigger stress state by raising voice
+- Week 3: Aaron feels the creature is "alive" after 1 hour of wear
+
+---
+
+## 10. Open Questions
+
+*Not decisions for Aaron — requires team follow-up*
+
+1. **IMU event primitive:** Does `brilliant-ble` support interrupt-style IMU callbacks, or must we poll? (NG to investigate)
+
+2. **Sprite format:** What's the canonical pixel-buffer format for Lua bitmaps? (NG to document)
+
+3. **Heap monitoring:** Is `frame.system.get_heap_usage()` available in current Lua stdlib? (NG to verify)
+
+4. **Baseline learning persistence:** Where do we store the wearer's baseline (mean, stddev) between sessions? On-device flash? Host filesystem?
+
+5. **Cross-platform parity:** If Phase 2 adds Web Bluetooth, how do we maintain parity with Python? Shared mood calculation logic?
+
+6. **Accessibility:** How does a wearer with colorblindness perceive stress vs. calm? (Da5id to propose alternative visual encoding)
+
+---
+
+*This is the first official Halo playground project. Build it fast, learn from it, iterate.*
+
+---
+
+**Document history:**
+- 2026-06-07: Initial draft (Hiro)
