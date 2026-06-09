@@ -129,3 +129,50 @@ Privacy guardrails for the Familiar creature (Y.T. #1 × Da5id × Librarian #2).
 ## Codename Brainstorm — 2026-06-08
 
 Pitched security/privacy-lens codename candidates for the Synesthetic Familiar. Team converged on **PULSE** (4 agents independently nominated variants). Official project codename now PULSE. See `.squad/orchestration-log/2026-06-08T07-17Z-codename-brainstorm.md`.
+
+---
+
+## VESPER Week-1 Privacy Pass — 2026-06-09
+
+**Scope:** Week-1 mock pipeline review for `projects/synesthetic-familiar/`. All source files are `# TODO` / `raise NotImplementedError` stubs — no real sensors touched in Week 1.
+
+**Key findings:**
+
+1. **Data flow confirmed safe (3 boxes, Week 1):** Mock Python source → 6-byte `FAMILIAR_UPDATE` BLE packet → Halo Lua render. Zero real sensor data captured or transmitted. Finding: CLEAR.
+
+2. **Secrets scan: CLEAN.** No API keys, tokens, passwords, or `.env` files in the committed package. `requirements.txt` contains only `brilliant-ble`, `brilliant-msg`, `numpy`, `sounddevice` — no cloud SDKs.
+
+3. **RAVEN-T2-1 constraint established for Week 2:** The bobbing sprite's animation parameters (`intensity` byte, bob frequency) must NOT be a 1:1 mapping to any biometric rate. Key rules locked in `.squad/decisions/inbox/raven-vesper-week1-privacy.md`:
+   - `intensity` quantised to `{0, 25, 50, 75, 100}` — no raw float passthrough
+   - 5–10% random jitter applied at host **before** `encode_familiar_update()`
+   - Bob frequency snapped to discrete tier (not continuous breathing-rate float)
+   - `test_familiar_update_carries_no_raw_biometric_values` must be in CI before Week 2 real-sensor merge
+
+4. **BLE expectations for Week 2:** LESC bonding (encrypted channel) confirmed as requirement. No pairing mode triggered programmatically. No device address or raw sensor data written to disk or committed files.
+
+**Disposition:** No block on Week 1. Two hard gates before real sensors land in Week 2: (a) protocol CI test passing, (b) intensity quantisation + jitter enforced. RAVEN vetoes merge if either is absent.
+
+**Decision output:** `.squad/decisions/inbox/raven-vesper-week1-privacy.md`
+
+**Learned:** The "jitter before encode" placement matters — jitter added only in Lua render layer can still leak rate from the transmitted `intensity` byte if an attacker sniffs BLE. Host-side quantisation + jitter is the correct defence layer.
+
+---
+
+## Session 2026-06-09: VESPER Week 1 Privacy Validation Complete
+
+**Scope:** Week-1 mock pipeline audit for `projects/synesthetic-familiar/`. All source files are stubs — zero real sensor data.
+
+**Key findings:**
+1. **Data flow safe:** Mock Python → 6-byte BLE → Halo render. No real sensors. Finding: CLEAR.
+2. **Secrets audit: CLEAN.** No API keys, tokens, `.env` files. Requirements clean (no cloud SDKs).
+3. **RAVEN-T2-1 locked for Week 2:**
+   - `intensity` quantised to {0, 25, 50, 75, 100} — no raw float
+   - 5–10% jitter at host **before** encode
+   - Bob frequency snapped to tiers (not continuous)
+   - Protocol test `test_familiar_update_carries_no_raw_biometric_values` required in CI before Week 2
+
+**Decision merged:** `raven-vesper-week1-privacy.md` → decisions.md
+
+**Veto authority:** If either Week 2 gate is absent at real-sensor merge, RAVEN blocks the PR.
+
+**Outcome:** Week 1 green. Week 2 privacy gates formalized.

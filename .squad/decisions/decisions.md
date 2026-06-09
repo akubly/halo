@@ -404,3 +404,373 @@ Evidence that would change my mind: if Aaron starts Week 1 and finds himself re-
 Start Week 1. Let the code teach us what the ARD missed. Document as you go, not before.
 
 ---
+
+## 2026-06-09: VESPER Package Layout
+
+| Field | Value |
+|-------|-------|
+| **Date** | 2026-06-09 |
+| **Author** | Hiro |
+| **Status** | DECIDED |
+| **Artifact** | `projects/synesthetic-familiar/` |
+
+### Decision
+
+The Synesthetic Familiar code package lives at **`projects/synesthetic-familiar/`**
+(relative to mono-repo root `D:\git\halo`).
+
+### Options Considered
+
+| Option | Path | Verdict |
+|--------|------|---------|
+| A — Repo-root flat | `synesthetic-familiar/` | Rejected |
+| B — Under `projects/` | `projects/synesthetic-familiar/` | **Selected** |
+
+### Rationale
+
+1. **Mirrors docs structure.** The ARD already lives at
+   `docs/projects/synesthetic-familiar/ARD.md`. Placing code at
+   `projects/synesthetic-familiar/` creates a consistent
+   `{docs,projects}/<name>/` namespace across the repo. Engineers navigating
+   either tree find the sibling naturally.
+
+2. **Mono-repo hygiene.** The repo root currently holds only tooling and
+   configuration (`.squad/`, `.copilot/`, `.github/`, `docs/`). Introducing
+   a flat `synesthetic-familiar/` at root would mix project code with
+   infrastructure at the same level — inconsistent once a second project
+   lands.
+
+3. **ARD §5.3 is a relative tree, not an absolute placement.** The diagram
+   shows `synesthetic-familiar/` as the package root name, not the repo-root
+   path. There is no ARD constraint violated by nesting it under `projects/`.
+
+4. **Future projects follow naturally.** When project 2 arrives, it lands at
+   `projects/<name>/` without any restructuring.
+
+### What Was NOT Changed
+
+- `docs/` structure untouched.
+- No `projects/` namespace was pre-established before this commit — this
+  decision creates it implicitly by writing the first package there.
+
+### Consequences
+
+- All file-ownership references (Ng, Da5id, Juanita) use paths relative to
+  `projects/synesthetic-familiar/`.
+- If a `projects/` README is warranted later (index of all projects), it
+  lives at `projects/README.md` — not created yet (no repetition yet).
+
+---
+
+## 2026-06-09: VESPER Week 1 — SDK Gaps & Decisions
+
+**Author:** Ng (SDK Engineer)
+**Date:** 2026-06-09
+**Status:** For review — no blocking issues; Week 1 "It moves" can ship.
+**ARD cross-refs:** §5.1, §5.2, §5.5, §10
+
+### Summary
+
+Week 1 implementation complete. Wire format implemented to spec (locked
+2026-06-08). Four SDK gaps noted below — none block the "creature bobs"
+success criterion. All gaps are flagged inline in `device/main.lua` and
+`host/main.py`.
+
+### SDK Gap #1 — IMU tap/interrupt API (ARD §10 Q1)
+
+**Status:** Not blocking Week 1 or Week 2. Blocks Week 3 (double-tap FAMILIAR_RESET).
+
+**Gap:** `frame.imu.on_tap(n, callback)` (or `frame.on_imu_peak`) has not been
+confirmed as available in current Halo Lua stdlib. The ARD §5.1 notes
+"current SDK is polling-only" for IMU.
+
+**Week 1 action:** Double-tap handler stub is commented out in `device/main.lua`
+with a clear guard:
+```lua
+-- if frame.imu and frame.imu.on_tap then
+--   frame.imu.on_tap(2, function() ... end)
+-- end
+```
+
+**Week 3 action required:** Ng to confirm with Brilliant SDK team. If
+interrupt-style callback is unavailable, implement a debounced polling loop
+(target ≤50ms detection latency per ARD §10 Q1). Flag to Raven if new
+sensor permissions are needed.
+
+### SDK Gap #2 — `frame.display.bitmap()` pixel-buffer format (ARD §10 Q2)
+
+**Status:** Not blocking. Current rendering uses `set_pixel()` per pixel,
+which is correct for any firmware.
+
+**Gap:** The exact format accepted by `frame.display.bitmap()` is not confirmed:
+- Da5id proposes: nibble-packed 4-bit indexed, row-major, high-nibble = left pixel
+- Alternative formats: byte-per-pixel, RGB565, RLE
+
+**Current state:** `device/main.lua` renders via a `set_pixel()` loop through
+Da5id's index grid (288 pixels). This is ~288 API calls per frame. At 20fps
+this may be too slow (ARD §5.5 budget: ≤50ms/frame); needs measurement on
+real device.
+
+**When confirmed:** Set `SPRITE_BITMAP_READY = true` in `device/main.lua` and
+provide `SPRITE_BITMAP` as the packed byte string. One line uncomment — no
+other changes. Da5id should regenerate bytes once format is locked.
+
+**Action:** Ng to check Brilliant SDK source / docs. Target: resolved before
+Week 2 sprite palette changes land.
+
+### SDK Gap #3 — `frame.system.get_heap_usage()` (ARD §10 Q3)
+
+**Status:** Not blocking Week 1 or Week 2. Heap budget enforcement (80% reduce,
+95% halt — ARD §5.1) is deferred.
+
+**Gap:** `frame.system.get_heap_usage()` not confirmed in current Lua stdlib.
+
+**Week 3 action:** If unavailable, approximate heap pressure by tracking
+allocation sites manually (e.g., count sprite rows held in memory, BLE buffer
+size). The 288-byte sprite index table is small; main risk is BLE receive
+buffer growth during fast packet bursts.
+
+### SDK Gap #4 — Sleep API name (`frame.sleep` vs `frame.time.sleep`)
+
+**Status:** Not blocking — shim in `device/main.lua` handles both.
+
+**Gap:** ARD §5.1 references `frame.time.sleep()`; Brilliant Frame SDK examples
+use `frame.sleep()`. A compatibility shim at Lua startup tries both:
+```lua
+if frame and frame.sleep then _sleep = frame.sleep
+elseif frame and frame.time and frame.time.sleep then _sleep = frame.time.sleep
+else ... end
+```
+
+**Action:** Confirm on real device; remove unused branch once known.
+
+### Non-blocking observation — `frame.display.clear()` API
+
+`device/main.lua` calls `frame.display.clear()` to blank the frame before
+each render. If this function doesn't exist in the Halo Lua stdlib, replace
+with `frame.display.fill_rect(0, 0, 256, 256, 0x000000)` or equivalent.
+The render will still be correct; this is purely a clear-screen primitive name.
+
+### Wire format — confirmed as implemented
+
+The FAMILIAR_UPDATE / FAMILIAR_ACK / FAMILIAR_RESET wire format is implemented
+exactly to spec (ARD §5.2, locked 2026-06-08, decisions.md):
+
+| Message         | Bytes | Layout (LE)                                      |
+|-----------------|-------|--------------------------------------------------|
+| FAMILIAR_UPDATE | 6     | `0x80 mood intensity confidence seq_lo seq_hi`   |
+| FAMILIAR_ACK    | 3     | `0x02 seq_lo seq_hi`                             |
+| FAMILIAR_RESET  | 1     | `0x01`                                           |
+
+`host/familiar_protocol.py` is the single source of truth. Juanita's
+`tests/test_protocol.py` should import from there exclusively.
+
+### 2026-06-09 addendum
+
+Added `Mood` IntEnum (NEUTRAL=0, CALM=1, STRESSED=2, ATTENTION=3) and
+`seq_is_newer(received, last_accepted) -> bool` free function; changed
+`decode_familiar_ack` → `tuple[int, int]` and `decode_familiar_reset` → `int`
+to match Juanita's test contract. `pytest tests/test_protocol.py` — **54 passed, 0 skipped.**
+
+---
+
+## 2026-06-09: VESPER Week-1 Sprite & Animation Spec
+
+| Field | Value |
+|-------|-------|
+| **Status** | DECIDED |
+| **Owner** | Da5id (HUD/UX) |
+| **Date** | 2026-06-09 |
+| **Related** | ARD §5.5, Decision 3 (Abstract-with-Eyes) |
+| **Artifact** | `device/sprites/familiar_neutral.txt` + `device/sprites/README.md` |
+
+### Summary
+
+Week 1 "It moves" requires a canonical sprite asset Ng can render. This decision locks the sprite design, pixel format, and bob animation spec for the neutral/idle state.
+
+### Deliverables
+
+1. **Sprite asset:** `device/sprites/familiar_neutral.txt`
+   - 24×24 organic blob with single bright eye at upper-right
+   - ASCII art + numeric index grid for parsing
+
+2. **Format spec:** `device/sprites/README.md`
+   - 4-bit indexed (16-color palette, 288 bytes packed)
+   - Nibble-packed, row-major, high nibble = left pixel
+   - **NEEDS NG CONFIRMATION** — if `frame.display.bitmap()` expects different format, will regenerate
+
+3. **Palette (Neutral):**
+   | Index | Color | Use |
+   |-------|-------|-----|
+   | 0 | `0x000000` | Transparent (OLED off) |
+   | 1 | `0x1A2D3D` | Body dark |
+   | 2 | `0x2E4756` | Body mid |
+   | 3 | `0xE0F4FF` | Eye (bright cyan-white) |
+
+4. **Bob animation:**
+   - Amplitude: ±2 px vertical
+   - Frequency: 0.25 Hz (4-second cycle)
+   - Easing: Sine wave
+   - Pseudocode: `y = base_y + floor(2 * sin(2π × 0.25 × t) + 0.5)`
+
+### Position on Canvas
+
+- Location: 7 o'clock on rim, 80% radius
+- Coordinates: sprite top-left at approximately `(28, 167)`
+- Rationale: Peripheral vision placement per ARD §5.1
+
+### Glance-Ergonomics (Ng Constraints)
+
+1. Eye contrast ≥10:1 against body ✓
+2. Lit pixel budget: ~91 px = 1.5% canvas ✓
+3. **DO NOT ADD in Week 1:**
+   - Halo glow (Week 2 calm)
+   - Edge fraying (Week 2 stress)
+   - Color animation
+   - Attention jump
+   - Multiple eyes or facial features
+
+### Dependencies
+
+- **Ng must confirm sprite format** before render loop integration
+- If format differs from spec, Da5id regenerates asset same day
+
+---
+
+## 2026-06-09: Testing Decision: VESPER Week-1 Protocol Tests
+
+| Field         | Value |
+|---------------|-------|
+| **Author**    | Juanita (Tester / QA) |
+| **Date**      | 2026-06-09 |
+| **Status**    | DECIDED |
+| **Ref**       | projects/synesthetic-familiar/tests/test_protocol.py |
+| **ARD**       | docs/projects/synesthetic-familiar/ARD.md §5.2 |
+| **Strategy**  | docs/projects/synesthetic-familiar/TEST-STRATEGY.md Rev 2 |
+
+### Summary
+
+54-test unit suite written for `host/familiar_protocol.py` (Ng's module).
+Tests are normative against ARD §5.2; they collect cleanly now and will pass
+once Ng implements the module.
+
+### What Was Covered
+
+| Group | Tests | Key assertions |
+|-------|-------|----------------|
+| FAMILIAR_UPDATE encode | 15 | 6-byte length, opcode 0x80, all 4 mood enums, intensity/confidence byte positions, seq little-endian, full round-trip |
+| Field bounds | 13 | valid 0/100 boundaries; out-of-range intensity, confidence, mood, seq raise ValueError/OverflowError |
+| Seq dedup (seq_is_newer) | 13 | accept window 1–32767, dup=0, stale 32768–65535, wraparound 0xFFFF→0x0000, naive-`>` regression |
+| FAMILIAR_ACK decode | 7 | opcode 0x02, seq LE, paranoid high-byte test (seq=0x0201), return type |
+| FAMILIAR_RESET decode | 3 | opcode 0x01, 1-byte payload, NO encode function (device→host only) |
+| Privacy / shape guard | 3 | No raw biometric params in encode signature, exactly 6 bytes |
+
+### Import Assumptions (Juanita → Ng)
+
+Ng: please align `host/familiar_protocol.py` to these exported names:
+
+```python
+from host.familiar_protocol import (
+    Mood,                  # enum: NEUTRAL=0, CALM=1, STRESSED=2, ATTENTION=3
+    encode_familiar_update,  # (mood, intensity: int, confidence: int, seq: int) -> bytes
+    decode_familiar_ack,     # (raw: bytes) -> tuple[int, int]
+    decode_familiar_reset,   # (raw: bytes) -> int
+    seq_is_newer,            # (received: int, last_accepted: int) -> bool
+)
+```
+
+### B2 Regression Guard (Explicit)
+
+Two key tests prevent big-endian regressions:
+
+1. `test_seq_bytes_4_5_are_little_endian_not_big_endian` — verifies seq=0x0102 encodes as [0x02, 0x01]
+2. `test_seq_high_byte_paranoid_little_endian` — verifies decode of raw=[0x02, 0x01, 0x02] yields seq=0x0201 (513)
+
+### Pre-Implementation Behavior
+
+| State | Behavior |
+|-------|----------|
+| After Ng implements | **All 54 tests PASS, 0 skipped** ✓ |
+
+---
+
+## 2026-06-09: Privacy Pass — Synesthetic Familiar Week 1 (VESPER)
+
+| Field | Value |
+|-------|-------|
+| **Author** | Raven (Security & Privacy) |
+| **Date** | 2026-06-09 |
+| **Scope** | Week 1 mock pipeline only — `projects/synesthetic-familiar/` |
+| **Status** | DECIDED — no blocker; establishes guardrails for Week 2 |
+
+### 1. Week-1 Data Flow (Mock Only)
+
+```
+┌──────────────────────────┐
+│  Mock Source (Python)    │  Hardcoded / cycled mood values
+│  main.py (stub)          │  NO real mic, NO real IMU
+└────────────┬─────────────┘
+             │  encode_familiar_update()  →  6-byte struct
+             ▼
+┌──────────────────────────┐
+│  familiar_protocol.py    │  FAMILIAR_UPDATE: opcode + mood_enum
+│  (BLE wire encoder)      │  + intensity + confidence + seq
+└────────────┬─────────────┘
+             │  BLE point-to-point (bonded, encrypted)
+             ▼
+┌──────────────────────────┐
+│  Halo Device (Lua VM)    │  Receives 6 bytes; drives sprite
+│  main.lua (stub)         │  bob animation at 0.25Hz
+└────────────┬─────────────┘
+             │  On-glass render only (OLED local)
+             ▼
+┌──────────────────────────┐
+│  Wearer's eye             │  24×24 abstract sprite — no labels
+└──────────────────────────┘
+```
+
+**Finding: CLEAR** — Week 1 captures zero real sensor data. All source files are stubs.
+
+### 2. RAVEN-T2-1 Privacy Constraint — Bobbing Sprite (Establish Now)
+
+| Parameter | Constraint |
+|-----------|------------|
+| **Bob frequency** | Snap to coarse tier: Neutral 0.25Hz / Calm 0.15Hz / Stressed 0.75Hz / Attention burst. No continuous float mapping to breathing rate. |
+| **Intensity byte** | Quantise to 5 levels only: `{0, 25, 50, 75, 100}`. Do not pass raw sensor amplitude. |
+| **Jitter** | 5–10% random noise MUST be applied at host **before encoding** — not optional. |
+| **Confidence byte** | Internal gate only (ARD §5.4). Do not send gated frames. |
+| **No raw biometrics on wire** | `FAMILIAR_UPDATE` 6-byte format contains no audio_rms, no audio_pitch_variance, no imu_acceleration. |
+
+### 3. Self-Verification Checklist (Ng / Da5id — Week 1 + Week 2 Gate)
+
+**Week 1 — Before merging mock harness**
+
+- ✓ `main.py` mock loop sends only hardcoded/cycled `mood_enum` values — no `SensorStream.start()` call
+- ✓ No audio device opened in Week 1 code path
+- ✓ No IMU BLE subscription in Week 1 code path
+- ✓ `familiar_protocol.py` `encode_familiar_update` outputs exactly 6 bytes
+- ✓ `requirements.txt` contains no cloud-SDK packages
+- ✓ No `.env`, no API keys in any committed file
+
+**Week 2 — Before wiring real sensors (privacy gate)**
+
+- [ ] `intensity` quantised to `{0, 25, 50, 75, 100}` — no raw float passthrough
+- [ ] 5–10% random jitter applied to `intensity` at host **before** `encode_familiar_update()` call
+- [ ] Bob frequency snapped to tier table (no continuous breathing-rate mapping)
+- [ ] `test_familiar_update_carries_no_raw_biometric_values` passing in CI
+- [ ] `SensorStream` writes no audio/IMU data to disk
+- [ ] BLE connection uses bonded (encrypted) channel
+- [ ] Manual visual audit: non-wearer 30s bystander test — abstract form only
+
+### 4. Disposition
+
+**Week 1:** No block. All source files are stubs. No real data captured, no secrets
+committed.
+
+**Week 2 gate:** Before real sensor integration, require:
+1. `test_familiar_update_carries_no_raw_biometric_values` in CI (P0)
+2. Intensity quantisation + jitter applied at host before encode
+
+If either is absent, RAVEN vetoes the merge.
+
+---

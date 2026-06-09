@@ -132,3 +132,51 @@ Post-test-strategy advisory review surfaced three ARD ambiguities. Resolved all 
 
 5. **Document from confusion, not speculation.** The anti-anchoring alternative (write a tech design anyway) would be correct if the ARD were requirements-only or if multiple independent implementers needed coordination. For a single-dev 2–3 week playground project with an implementation-grade ARD, front-loading a tech design is premature documentation. The signal to write one mid-sprint: if the implementer keeps re-reading the ARD to answer "how should X talk to Y" and can't find the answer.
 
+---
+
+## VESPER Scaffold — 2026-06-09
+
+Created the Week 1 code scaffold for the Synesthetic Familiar at `projects/synesthetic-familiar/`.
+
+### Package Location Decision
+
+**Chose `projects/synesthetic-familiar/`** (not repo-root flat). Rationale: mirrors `docs/projects/synesthetic-familiar/` so code and docs share a namespace; keeps repo root clean (tooling/config only); ARD §5.3 tree is a relative path, not an absolute placement directive. Decision record: `.squad/decisions/inbox/hiro-vesper-package-layout.md`.
+
+### Scaffold Files Created
+
+- `host/main.py` — entry point stub (Ng owns mock-send harness)
+- `host/sensors.py` — `SensorFrame` dataclass + `SensorStream` async iterator signatures
+- `host/inference.py` — `MoodResult` dataclass + `compute_mood()` signature + threshold constants
+- `host/familiar_protocol.py` — thin stub, docstring + TODO only (Ng owns)
+- `host/requirements.txt` — loosely-pinned deps: `brilliant-ble`, `brilliant-msg`, `numpy>=1.24`, `sounddevice>=0.4`
+- `device/main.lua` — thin stub, docstring + TODO only (Ng owns)
+- `device/sprites/.gitkeep` — empty dir placeholder (Da5id owns assets)
+- `tests/test_inference.py` — five stub test cases matching ARD §5.4 scenarios
+- `tests/test_protocol.py` — thin stub, docstring + TODO only (Juanita owns)
+- `README.md` — project summary, Week 1 goal, file map, ownership table
+
+### Ownership Summary
+
+Ng: `familiar_protocol.py`, `main.py` (harness), `device/main.lua`  
+Da5id: `device/sprites/*`  
+Juanita: `tests/test_protocol.py`  
+Shared: `sensors.py`, `inference.py`, `tests/test_inference.py` (stubs ready for Week 2 fill-in)
+
+---
+
+## Session 2026-06-09: VESPER Week 1 Kickoff Coordinator Role
+
+**Role:** Coordinated 5-agent parallel execution (Ng, Da5id, Juanita, Raven, self).
+
+**Key coordination moment — Integration Reconciliation:**
+- Detected contract drift: Juanita's tests expected `Mood` IntEnum + `seq_is_newer` export; Ng initially used int constants
+- Brokered alignment: Ng examined test expectations and added both exports without changing tests
+- **Result:** Mood enum + seq_is_newer function are now **canonical** and locked per test contract
+
+**Orchestration logs written:**
+- 5 agent logs (one per agent) + session log capture key moments
+- All decisions from inbox merged into decisions.md (no duplicates)
+- Decisions archive gate passed (no entries >30 days old)
+
+**Outcome:** Week 1 "It moves" software foundation complete. 54 tests passing. Hardware validation pending.
+

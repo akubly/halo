@@ -121,3 +121,40 @@ See `.squad/agents/ng/ideation-pass2-2026-06-02.md`.
 - FAMILIAR_UPDATE: 6 bytes (opcode, mood, intensity, confidence, seq LE)
 - FAMILIAR_ACK: 3 bytes (opcode, seq LE)
 - FAMILIAR_RESET: 1 byte (opcode only)
+
+---
+
+### 2026-06-09: VESPER Week 1 Implementation — "It Moves"
+
+**What shipped:**
+- `host/familiar_protocol.py` — full encode/decode, `SequenceCounter`, `dispatch_device_message`.  Single source of wire truth; all 6 smoke tests pass.
+- `host/main.py` — `MockTransport` / `BrilliantBleTransport` behind a `Transport` Protocol seam.  `--mock` flag runs without hardware.  Mock loop cycles NEUTRAL→CALM→STRESSED→NEUTRAL every 8s at 10Hz, driving the creature's bob frequencies.
+- `device/main.lua` — BLE receive callback (opcode dispatch), wraparound-aware dedup, 20fps render loop, sine-wave bob, `set_pixel()` sprite renderer using Da5id's index grid, ACK every 10 accepted packets, 10s timeout → neutral fallback, unsolicited ACK on startup/reconnect.
+
+**Da5id artifact discovered:** `device/sprites/familiar_neutral.txt` has the full 24×24 index grid and `sprites/README.md` specifies sprite center (40, 179), bob spec (±2px, 0.25Hz sine), and nibble-packed format proposal.  Used directly in Lua.
+
+**Transport seam pattern:** `MockTransport` and `BrilliantBleTransport` both implement the `Transport` Protocol.  Juanita can inject `MockTransport` in tests without patching; no monkeypatching needed.  Constructor injection only.
+
+**Four SDK gaps documented** in `.squad/decisions/inbox/ng-vesper-week1.md`:
+1. IMU tap callback (blocks Week 3 double-tap only)
+2. `frame.display.bitmap()` format (set_pixel fallback always correct; confirm before Week 2)
+3. `frame.system.get_heap_usage()` (defer to Week 3)
+4. `frame.sleep` vs `frame.time.sleep` (shim in place)
+
+**Key judgment call:** Sprite renders via 288 `set_pixel()` calls/frame.  This may be too slow at 20fps on the M55 (ARD budget: ≤50ms/frame).  Measure on real device; swap in `bitmap()` when format confirmed — one-line change in `main.lua`.
+
+**Week 1 success bar:** creature bobs without jitter; BLE messages log cleanly.  Both achievable with what shipped.
+
+---
+
+## Session 2026-06-09: VESPER Week 1 Kickoff Integration Reconciliation
+
+**Coordination Event:** Juanita's test suite expected `Mood` IntEnum + `seq_is_newer` free function export from `familiar_protocol.py`. Initial Ng implementation used int constants and no dedup helper. Hiro coordinated alignment.
+
+**Resolution:** Ng examined test contract and added both exports **without changing tests**:
+- Added `Mood` IntEnum: NEUTRAL=0, CALM=1, STRESSED=2, ATTENTION=3
+- Added `seq_is_newer(received, last_accepted) → bool` free function (signed-16 delta dedup window)
+
+**Consequence:** These exports are now **canonical** and locked. Any future code importing from `familiar_protocol` must follow this contract. The test suite (54 tests) is the executable specification.
+
+**Outcome:** 54 tests passed, 0 skipped. Wire format locked as implemented.
