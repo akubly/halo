@@ -9,6 +9,14 @@
 | **Source** | Theme-2 user stories + ideation pass 2 |
 | **Project Type** | Playground demo (throwaway-OK) |
 
+### Document History
+
+| Date | Change | Author |
+|------|--------|--------|
+| 2026-06-07 | Initial ARD authored and approved | Hiro |
+| 2026-06-08 | Architecture clarifications (heap ownership, quick-reset ownership, confidence-gating authority) — post-test-strategy review | Hiro |
+| 2026-06-08 | BLE wire-format spec finalized (endianness, seq wraparound/dedup, FAMILIAR_RESET as device→host, ACK cadence) — Ng |
+
 ---
 
 ## 1. Overview & Goal
@@ -77,7 +85,7 @@
 | JUANITA-T2-1 | Animation graceful degradation | Lua render | P1 |
 | JUANITA-T2-2 | Offline mode when cloud fails | Host inference | P0 |
 | JUANITA-T2-3 | Lua heap exhaustion handling | Lua runtime | P2 |
-| JUANITA-T2-5 | Quick-reset gesture | Lua input | P1 |
+| JUANITA-T2-5 | Quick-reset gesture | Lua input — device-owned | P1 |
 | RAVEN-T2-1 | Abstract visuals — no biometric leak | Design constraint | P0 |
 | HIRO-T2-1 | Mood/render decoupling | Architecture | P0 |
 | HIRO-T2-2 | Graceful sensor degradation | Architecture | P0 |
@@ -154,7 +162,7 @@
 |-----------|----------|-----------|
 | Sensor capture | Host (phone mic/IMU) or device relay | Phone has better mic; device IMU is supplementary |
 | Mood inference | **Host (local heuristic)** | M55 NPU is for gate-keeping, not inference (LIBRARIAN finding). Latency budget 200-500ms acceptable. Cloud deferred to Phase 2. |
-| Confidence gating | **Host** | "Silence is safer than wrong" (LIBRARIAN-T2-5-ERROR) |
+| Confidence gating | **Host** | "Silence is safer than wrong" (LIBRARIAN-T2-5-ERROR). **Host is the single authority; any device-side gating is optional defense-in-depth, not required behavior.** |
 | State interpolation | **Device** | Smooth animation must be local; BLE latency too high |
 | Sprite rendering | **Device** | Display is on-device; Lua render loop |
 | Fallback on BLE drop | **Device** | Local IMU-only inference, then neutral state after 10s |
@@ -175,7 +183,7 @@
 - Render sprite at 15-30fps depending on complexity
 - Handle local IMU events (`on_imu_peak`) for motion-triggered reactions
 - Manage graceful degradation: if no BLE update for 10s, enter neutral state
-- Respect heap budget: <80% usage triggers reduced animation complexity
+- Respect heap budget: <80% usage triggers reduced animation complexity; safe-halt at 95%. **Heap management is device-local; not reflected in any host-bound message** — FAMILIAR_ACK carries seq only, no heap flag.
 
 **Sprite specification (per DASID-T2-1):**
 - Size: 24×24 pixels (expandable to 48×48 in Phase 2)
@@ -205,21 +213,70 @@ NEUTRAL (default) ─┬─▶ CALM (low tension, sustained 60s)
 
 **Message types needed:**
 
-| Direction | Message | Payload | Frequency |
-|-----------|---------|---------|-----------|
-| Host → Device | `FAMILIAR_UPDATE` | mood_enum (4 states), intensity (0-100), confidence (0-100) | 10Hz max |
-| Device → Host | `FAMILIAR_ACK` | last_received_seq | On request |
-| Host → Device | `FAMILIAR_RESET` | (none) | On gesture |
+| Direction | Message | Opcode | Payload | Frequency |
+|-----------|---------|--------|---------|-----------|
+| Host → Device | `FAMILIAR_UPDATE` | `0x80` | mood_enum (0–3), intensity (0–100), confidence (0–100), seq (uint16 LE) | 10Hz max |
+| Device → Host | `FAMILIAR_ACK` | `0x02` | last_received_seq (uint16 LE) | Every 10 accepted updates |
+| Device → Host | `FAMILIAR_RESET` | `0x01` | (none) | On double-tap gesture |
 
-**Wire format (fits in single BLE packet):**
+> **Quick-reset ownership (decided 2026-06-08):** Double-tap is detected **on-device** (Lua IMU/tap input) and handled locally — device snaps to NEUTRAL immediately, no host round-trip required. `FAMILIAR_RESET` is a **Device→Host notification** (not a host command). No Host→Device reset opcode exists or is needed.
+>
+> **Heap management is device-local; not reflected in any host-bound message.** `FAMILIAR_ACK` carries last received seq only — no heap field.
+
+**Opcode space:**
+
+| Range | Direction | Notes |
+|-------|-----------|-------|
+| `0x00–0x7F` | Device → Host | Notifications and ACKs originating on device |
+| `0x80–0xFF` | Host → Device | Commands originating on host |
+
+**Endianness:** All multi-byte fields are **little-endian (LE)**. This is idiomatic for BLE (ATT layer is LE) and for the ARM Cortex-M55 on Halo. Host Python uses `struct.pack('<HH', ...)` ; device Lua uses `string.pack('<I2', seq)` / `string.unpack('<I2', data, offset)`.
+
+**Wire formats (all fit in a single BLE packet):**
 ```
-FAMILIAR_UPDATE:
-  byte 0: opcode (0x80)
-  byte 1: mood_enum (0=neutral, 1=calm, 2=stressed, 3=attention)
-  byte 2: intensity (0-100)
-  byte 3: confidence (0-100)
-  byte 4-5: sequence number (uint16)
+FAMILIAR_UPDATE (Host → Device, opcode 0x80):
+  byte 0:   opcode (0x80)
+  byte 1:   mood_enum (0=neutral, 1=calm, 2=stressed, 3=attention)
+  byte 2:   intensity (0–100)
+  byte 3:   confidence (0–100)
+  byte 4–5: sequence number (uint16, little-endian)
+  Total: 6 bytes
+
+FAMILIAR_ACK (Device → Host, opcode 0x02):
+  byte 0:   opcode (0x02)
+  byte 1–2: last_received_seq (uint16, little-endian)
+  Total: 3 bytes
+
+FAMILIAR_RESET (Device → Host, opcode 0x01):
+  byte 0:   opcode (0x01)
+  Total: 1 byte  (occurrence is the signal; no payload)
 ```
+
+**Sequence number semantics:**
+
+- **Range:** uint16 (0x0000–0xFFFF); wraps 0xFFFF → 0x0000.
+- **Host responsibility:** increment seq monotonically on each outgoing `FAMILIAR_UPDATE`; restart at 0x0000 after reconnect.
+- **Device dedup / ordering (wraparound-aware):** On receipt of a packet carrying `received_seq`, the device computes:
+
+  ```
+  delta = (received_seq - last_accepted_seq) mod 65536
+  ```
+
+  Interpret `delta` as a **signed 16-bit integer** (if delta > 32767, treat as negative):
+
+  | delta value | Interpretation | Action |
+  |-------------|----------------|--------|
+  | `0` | Duplicate | Drop silently |
+  | `1 – 32767` | Newer (including wraparound) | Accept; set `last_accepted_seq = received_seq` |
+  | `32768 – 65535` (i.e. signed negative) | Stale or out-of-order | Drop silently |
+
+  The acceptance window (half the uint16 space = 32 767 packets) is far beyond any practical 10 Hz use case; there is no ambiguity at normal operating rates.
+
+- **On reconnect:** host resets seq to 0x0000; device resets `last_accepted_seq` to 0xFFFF so that the first received seq=0x0000 yields delta=1 and is accepted.
+
+**ACK cadence:**
+
+The device sends `FAMILIAR_ACK` automatically after every **10 accepted `FAMILIAR_UPDATE` packets** — no host-initiated request message is needed. At 10 Hz this yields approximately one ACK per second, giving the host sufficient signal to detect sustained packet loss. The device also sends an unsolicited `FAMILIAR_ACK` immediately on BLE reconnect (reporting the current `last_accepted_seq`).
 
 **SDK packages:**
 - `brilliant-ble` (Python): BLE connection, message transport
@@ -303,6 +360,7 @@ def compute_mood(audio_rms, audio_pitch_variance, imu_acceleration, imu_rotation
 - If confidence < 0.7, do NOT update Familiar state
 - Better to show stale-but-correct than fresh-but-wrong
 - "Silence is safer than hallucination"
+- **The host is the single authority for confidence gating.** Device-side gating, if any, is optional defense-in-depth and not required behavior.
 
 **Baseline learning (Phase 1 simplified):**
 - First 3 days: use population defaults
@@ -480,17 +538,19 @@ def compute_mood(audio_rms, audio_pitch_variance, imu_acceleration, imu_rotation
 
 *Not decisions for Aaron — requires team follow-up*
 
-1. **IMU event primitive:** Does `brilliant-ble` support interrupt-style IMU callbacks, or must we poll? (NG to investigate)
+1. **IMU event primitive:** Does `brilliant-ble` support interrupt-style IMU callbacks, or must we poll? If polling-only, Lua must implement a debounced tap-detection loop; target latency ≤50ms. (NG to investigate with SDK team)
 
-2. **Sprite format:** What's the canonical pixel-buffer format for Lua bitmaps? (NG to document)
+2. **Sprite format:** What is the canonical pixel-buffer format for Lua `bitmap()` calls — indexed 4-bit, raw RGB565, or run-length encoded? Determines sprite asset pipeline. (NG to document from SDK source / Brilliant docs)
 
-3. **Heap monitoring:** Is `frame.system.get_heap_usage()` available in current Lua stdlib? (NG to verify)
+3. **Heap monitoring:** Is `frame.system.get_heap_usage()` available in current Lua stdlib? If absent, safe-halt threshold must be approximated by tracking allocation sites manually. (NG to verify against current Halo firmware)
 
-4. **Baseline learning persistence:** Where do we store the wearer's baseline (mean, stddev) between sessions? On-device flash? Host filesystem?
+4. **Baseline learning persistence:** Where do we store the wearer's personal baseline (mean, stddev) between sessions — on-device flash, host filesystem, or cloud? Phase 1 can use host filesystem; Phase 2 needs a durable strategy. (Aaron + Hiro to decide before Phase 2)
 
-5. **Cross-platform parity:** If Phase 2 adds Web Bluetooth, how do we maintain parity with Python? Shared mood calculation logic?
+5. **Cross-platform parity:** If Phase 2 adds Web Bluetooth, how do we maintain parity with the Python host? Shared mood calculation logic requires a JS port or a shared native library. (Deferred to Phase 2 scoping)
 
 6. **Accessibility:** How does a wearer with colorblindness perceive stress vs. calm? (Da5id to propose alternative visual encoding)
+
+> **Resolved (2026-06-08, Ng):** Wire-format items previously listed here — endianness, sequence wraparound/dedup, FAMILIAR_RESET direction and opcode, ACK cadence — are now fully specified in §5.2. No further open questions on BLE wire format.
 
 ---
 
