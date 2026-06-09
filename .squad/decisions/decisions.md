@@ -339,3 +339,68 @@ All 11 advisory review findings (3 blocking, 7 important, 1 minor) are closed in
 - **M11 — Appendix A Blockers:** Restructured into RESOLVED (R1–R7: endianness, ACK, seq, FAMILIAR_RESET, heap, confidence, quick-reset) and OPEN (7 items: emulator API, RNG seam, sprite format, baseline persistence, IMU interrupt). No review findings remain open.
 
 ---
+
+## 2026-06-08: Skip Standalone Technical Design for VESPER Phase 1
+**Status:** Proposed  
+**Owner:** Hiro (Architect)  
+**Date:** 2026-06-08  
+**For:** Aaron (final approval)
+
+## Recommendation
+
+**Do not author a standalone technical design document before Week 1 implementation.** The ARD + Test Strategy already cover implementation-grade detail. A separate tech design would re-litigate locked decisions and add documentation overhead disproportionate to a 2–3 week playground project.
+
+## What the ARD Already Covers (implementation-grade)
+
+- **Wire format** (§5.2): Byte-level spec for all 3 message types, endianness, seq wraparound/dedup, opcode space, ACK cadence — normative, not sketched
+- **Component decomposition** (§5.1–§5.5): File-level structure (\main.lua\, \host/main.py\, \sensors.py\, \inference.py\, \amiliar_protocol.py\), responsibilities per module
+- **Interface contracts** (§5.3–§5.4): Constructor signatures, inference pipeline code, confidence gating logic, sensor fallback hierarchy
+- **State machine** (§5.1): Four states with transitions and thresholds
+- **Render spec** (§5.5): Sprite size, position, palette, animation per state, lit-pixel budget, rendering primitives
+- **Autonomy table** (§4): Component-by-component location decisions with ownership (host vs. device)
+- **Dependency list** (§6): Exact packages, versions, licenses
+
+## What the Test Strategy Already Covers
+
+- **Ports & Adapters seams** (§3): \TransportPort\, \SensorSourcePort\, \ClockPort\ with real/fake adapter pairs
+- **Constructor injection signatures** (§3): \FamiliarApp.__init__\ with all injectable dependencies
+- **Test pyramid** (§2): Four-tier structure with mock/real boundaries per layer
+- **Story→test mapping** (§5): Every user story mapped to specific test expectations
+- **Definition of Done per story** (§9): Concrete acceptance criteria
+
+## What a Tech Design Would Add — and Why It's Not Worth It
+
+| Potential Addition | Value | Why Skip |
+|--------------------|-------|----------|
+| Class diagrams / UML | Visual overview | ARD §5 is already file-level; drawing boxes around 5 files adds ceremony, not clarity |
+| Sequence diagrams (host↔device) | Timing clarity | §4 data flow + §5.2 wire format already specify the exact sequence at byte level |
+| API contracts doc | Formal interfaces | Test Strategy §3 already defines port interfaces with constructor signatures |
+| Error handling matrix | Exhaustive failure modes | ARD §5.4 fallback hierarchy + §8 risk table + Test Strategy §6 edge cases cover this |
+| Performance budgets | Quantified targets | ARD §5.5 already specifies: 50ms/frame, 32 sprites/frame, <5mW idle, 15–30fps |
+
+## Lightweight Replacement
+
+Instead of a tech design doc, use **per-package READMEs written during implementation** (not before):
+
+1. \synesthetic-familiar/host/README.md\ — emerges from Week 1 code
+2. \synesthetic-familiar/device/README.md\ — emerges from Week 1 code
+3. ARD §10 open questions (6 items) get resolved inline as Ng investigates SDK gaps
+
+These are cheaper, stay current, and don't front-load speculation.
+
+## Anti-Anchoring: When Would a Tech Design Be Warranted?
+
+A standalone tech design would be the right call if:
+
+- **The ARD were requirements-only** (what, not how) — but it's not; §5 is implementation-grade
+- **Multiple implementers needed coordination** — but Phase 1 is one dev (Aaron) with agent support
+- **The wire format were still open** — but Ng locked it on 2026-06-08
+- **Cross-package integration were complex** — but this is 2 packages (host Python, device Lua) with 1 BLE pipe
+
+Evidence that would change my mind: if Aaron starts Week 1 and finds himself re-reading the ARD to answer "how should X talk to Y" questions that the ARD doesn't address, that's the signal to write a thin interface-contract doc mid-sprint. But write it from real confusion, not speculative prevention.
+
+## Verdict
+
+Start Week 1. Let the code teach us what the ARD missed. Document as you go, not before.
+
+---

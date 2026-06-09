@@ -5,68 +5,18 @@
 - **Stack:** TBD per package; SDK languages are Python, Flutter (Dart), Web Bluetooth (JS/TS). Lua 5.3 runs on-device.
 - **Created:** 2026-06-01
 
-## Learnings
+## Learnings Summary
 
-### 2026-06-01 — Product & Architecture Overview
-- **Halo is a host-app model** (not a traditional OS with app launcher). Glasses are *peripheral*, host (mobile/desktop) *drives logic*. Implication: each SDK is independent client lib; no cross-SDK coordination needed at build time. [https://docs.brilliant.xyz/halo/halo-sdk/]
-- **3 canonical SDK targets**: Python (Mac/Linux/Windows), Flutter (iOS/Android), Web Bluetooth (Chromium on desktop/Android). Lua 5.3 on-device for event loops & custom processing. [https://docs.brilliant.xyz/halo/halo-sdk/]
-- **Halo hardware**: Cortex-M55 + NPU, 14h battery, Bluetooth 5.3. Tight memory/power constraints. On-device AI inference possible, but host does heavy lifting. [https://brilliant.xyz/]
-- **Shared concerns across SDKs**: BLE protocol abstraction (Bluetooth LE Specs), Lua VM wire protocol, example/reference apps. **Distinct concerns**: language-specific testing, build, package management. Suggests SDK-per-workspace structure with optional shared tooling workspace.
-- **No "shared logic" cross-SDK**: Unlike a traditional app platform, there's no server-side SDK or shared compute that all SDKs depend on. Each SDK is independent. Mono-repo can remain flat; only extract shared infra if 3+ packages need it. [https://docs.brilliant.xyz/halo/halo-sdk/]
+### Halo Architecture Foundations (2026-06-01)
+- **Host-app model**: Glasses are peripherals; host drives logic. 3 canonical SDKs (Python, Flutter, Web Bluetooth), Lua on-device. Mono-repo can stay flat; SDK-per-workspace only if 3+ packages share tooling.
+- **Lineage**: Monocle (closed) → Frame (Python+Flutter) → Halo (web+lua event loop rewrite). SDK API surface survives; on-device semantics churn. Brilliant prioritizes velocity over backward compat.
 
-### 2026-06-01 — Lineage: Monocle → Frame → Halo
-- **Monocle** (gen 1, monocular): Python only, programmed via AR Studio (VSCode extension). Firmware updates via AR Studio. Closed ecosystem.
-- **Frame** (gen 2, binocular): Python + Flutter SDKs introduced. Still tightly coupled host model. **Lua event loop architecture fundamentally changed** Frame→Halo (old keyed-table parser model → new ordered-queue model). Migration required rewriting all on-device event loops. [https://docs.brilliant.xyz/frame/frame/, https://raw.githubusercontent.com/brilliantlabsAR/brilliant_sdk/main/python/MIGRATION.md]
-- **Web Bluetooth SDK added** (gen 2.5 → Halo): Targets browsers & web platforms. No Frame Web SDK existed.
-- **Package names renamed**: `frame-ble`/`frame-msg` → `brilliant-ble`/`brilliant-msg`. Signals Brilliant's intent to support *future devices* under a unified SDK brand. [Migration guides]
-- **SDK API surface survived 2 gens**: BLE communication pattern, Lua integration, camera/mic/display control remain stable. The churn is in **on-device event loop semantics**, not host SDK contracts.
-- **Brilliant is willing to break Lua APIs.** Frame→Halo forced rewrite of `frame_app.lua` across all users. This suggests SDKs should *not* over-invest in backward compat abstractions; velocity & clarity matter more. [https://raw.githubusercontent.com/brilliantlabsAR/brilliant_sdk/main/python/MIGRATION.md]
-
-## Session 2026-06-08: VESPER ARD Clarifications — 3 Decisions Locked
-- Amended ARD §3/§4/§5.2/§5.4: heap device-local, quick-reset device-originated, confidence-gating host-authority. All blocked on wire-format spec; routed Ng.
-
-## Ideation 2026-06-02
-
-1. **Glasses as distributed compute mesh** — Multiple Halo wearers auto-discover and form a P2P cluster; each pair contributes CPU cycles for collective ML inference tasks (vision, language, reasoning) with the network coordinating work distribution and result synthesis.
-
-2. **Wearable temporal viewport** — Halo queries a shared local-first database of recorded sensor feeds (camera, audio, IMU) from nearby wearers and devices; you see any scene at any past moment within your network's retention window, navigable by time scrubbing gestures.
-
-3. **Embodied protocol-buffer mesh** — Each Halo is a first-class gRPC service endpoint advertising capabilities; two wearers' glasses auto-negotiate message schemas, service discovery, and bi-directional streaming without a central broker—the mesh is self-describing.
-
-4. **Gaze-driven distributed tracing** — Your eye gaze becomes an OpenTelemetry tracing context; every service in your personal network receives your attention vector; you see latency and throughput *in your visual field* as the traces propagate through your infrastructure.
-
-5. **Glasses as edge orchestrator** — Halo becomes the command center for heterogeneous edge devices (phones, laptops, IoT sensors, local servers); you gesture to claim/release capabilities or re-balance workloads; topology and state are displayed as a zoomable spatial layer.
-
-6. **Consensual overlay reality** — Multiple Halo wearers in the same physical space each see *different* overlays on identical scenes, computed from their trust graph, interests, and social role; overlays are encrypted and merged at the edge, never centralized.
-
-7. **Embodied microservices topology** — Every Halo wearer running an app is a microservice node on a graph; nodes dynamically claim/release capabilities (e.g., "I can process video now," "I can transcribe audio"); the topology is rendered as a 3D constellation visible to all wearers.
-
-8. **Live architecture debugger for edge** — Halo becomes a spatial debugger for distributed systems: walk through a room and *see* message flow between services as light trails, latency as visual thickness, bottlenecks as red hotspots; topology rotates to follow your head position.
-
-## User Stories Themes 1–2 — 2026-06-03
-
-Authored user stories for Aaron's two top-ranked themes through architectural lens:
-
-- **Theme 1 — Consent-Aware Memory** (5 stories): Consent as protocol infrastructure. Captures architectural requirements: cryptographic notarization, peer-to-peer verification, time-based durability boundaries, graceful sensor fallbacks, consent observability.
-  
-- **Theme 2 — The Synesthetic Familiar** (5 stories): Familiar as modular state machine. Captures architectural requirements: mood/render decoupling, sensor-degradation hierarchy, cross-device roaming state, distributed mood computation, performance observability within HUD budget.
-
-**Key insight:** Both themes surface **constraints-as-architecture** pattern. Privacy (consent), display budget, battery, and reliability are not bolt-on features; they shape mono-repo structure, BLE protocol, SDK contracts, and observability layer.
-
-**Stories saved:** `.squad/agents/hiro/user-stories-themes-1-2-2026-06-03.md`
-
----
-
-## Ideation Pass 2 — 2026-06-02
-
-Cross-pollination complete. Key insights from team's 8 agents:
-
-- **Resonance**: Librarian's persistent embodied agents (rewires host-peripheral model), Raven's privacy-as-first-class-constraint (changes BLE protocol design), YT's on-device tracking loop (reveals device autonomy tier beyond host command).
-- **Strongest mash-up**: Self-Describing Privacy Mesh (Hiro #3 × Librarian #1 × Raven #6) — unifies distributed protocols with cryptographic consent metadata, enabling multi-wearer collaboration without central broker while keeping privacy locally enforceable.
-- **New cross-cutting concern**: Device Autonomy Tiers (local, hybrid, collective) — mono-repo gains a new structural dimension. Every playground project now has an autonomy-tier assignment.
-- **Practical shift**: Mono-repo becomes a consent teaching tool (Raven × Lagos lens). YT's host-app scaffold gains mandatory "Consent Initialization" section.
-
-Full synthesis: `.squad/agents/hiro/ideation-pass2-2026-06-02.md`
+### Team Ideation & Themes (2026-06-02 to 2026-06-03)
+- **Theme 1**: Consent-Aware Memory (privacy as protocol infrastructure)
+- **Theme 2**: The Synesthetic Familiar (familiar as state machine, mood/render decoupling)
+- **Key insight**: Constraints-as-architecture (privacy, display budget, battery shape mono-repo structure, BLE protocol, SDK contracts).
+- **Cross-cutting concern**: Device Autonomy Tiers (local, hybrid, collective).
+- **Strongest mash-up**: Self-Describing Privacy Mesh (distributed protocols + cryptographic consent + edge enforcement).
 
 ---
 
@@ -175,4 +125,10 @@ Post-test-strategy advisory review surfaced three ARD ambiguities. Resolved all 
 2. **Quick-reset is device-owned.** §3 labeled JUANITA-T2-5 as "Lua input" (on-device) while §5.2 listed `FAMILIAR_RESET` as Host→Device — a direct contradiction. Decision: double-tap detected on-device (Lua IMU/tap), device snaps to NEUTRAL immediately with no host round-trip. FAMILIAR_RESET flipped to Device→Host notification. Rationale: the wearer is correcting a bad inference in real-time; waiting for a host round-trip adds 100-300ms latency and fails if BLE is degraded. Device owns the reset; host can observe via notification. Ng inherits this direction for byte-level spec.
 
 3. **Confidence gating authority is the host alone.** §4 and §5.4 both said confidence gating lives on the host, but left ambiguity about whether device-side gating was also expected. Test Strategy added redundant device-side gating as "required" behavior. Fix: make explicit in §4 autonomy table and §5.4 bullets — host is the single authority; device-side gating is optional defense-in-depth only. Lesson: "authority" must be named explicitly when a concern could reasonably live in two places.
+
+### 2026-06-08 — Tech Design Decision for VESPER
+
+4. **An ARD that specifies byte-level wire formats, file-level decomposition, and constructor signatures IS the technical design.** Aaron asked whether a separate tech design doc was needed before Week 1. Assessed the ARD (§4–§5.5) and Test Strategy (§2–§3) and found they already cover: wire format at byte level, component decomposition at file level, interface contracts with injection signatures, state machine transitions, render specs with pixel budgets, and ports-and-adapters seams. A standalone tech design would re-litigate locked decisions. Recommended: skip it, use per-package READMEs that emerge from implementation. Decision filed to `.squad/decisions/inbox/hiro-vesper-techdesign.md`.
+
+5. **Document from confusion, not speculation.** The anti-anchoring alternative (write a tech design anyway) would be correct if the ARD were requirements-only or if multiple independent implementers needed coordination. For a single-dev 2–3 week playground project with an implementation-grade ARD, front-loading a tech design is premature documentation. The signal to write one mid-sprint: if the implementer keeps re-reading the ARD to answer "how should X talk to Y" and can't find the answer.
 
