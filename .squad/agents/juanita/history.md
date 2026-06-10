@@ -62,3 +62,6 @@ Applied 9 persona-review findings to TEST-STRATEGY.md. All changes surgical; mix
 
 ### Global coverage gates are a false safety signal (2026-06-09)
 - `--cov-fail-under=90` on the whole test suite can pass with 100% coverage of trivial files masking 60% on critical ones. A selective gate on the single most important module (familiar_protocol.py at 95%) is more honest and actionable than a blunt global threshold.
+
+## Learnings
+- `--cov-fail-under` without `--cov=<module>` is silently ignored by pytest-cov; always pair them: `pytest --cov=<module> --cov-fail-under=N <test_file>` (2026-06-09, T7 PR review).

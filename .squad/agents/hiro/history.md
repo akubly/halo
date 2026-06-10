@@ -199,3 +199,9 @@ Applied 15 accepted findings (B1, B2, I1, I2, I4, I5, I6, I7, I9, I12, M1–M5) 
 5. **Jitter is not privacy.** Visual jitter provides anti-robotic animation polish; it does not protect against an informed observer. Conflating the two weakens the honest privacy posture. Real protection = obscurity + abstraction.
 
 6. **Storage strategy must be locked before tests can be written.** Baseline persistence was "Phase 1 can use host filesystem" but was never locked. Juanita's test was blocked. Rule: if a test references a storage layer, the ARD must name it explicitly.
+
+---
+
+## Learnings
+
+2026-06-09: PR #1 review pass — 7 doc-consistency fixes across ARD.md and decisions.md: `struct.pack('<HH', ...)` → `'<H'` for single uint16; NEUTRAL reachability has two distinct paths (sensor fallback vs confidence-hold timeout which sends last-computed mood, not necessarily NEUTRAL); raw audio/IMU never leaves host (not BLE pipe); full FAMILIAR_UPDATE wire format in privacy section; Week-1 jitter criterion now forbids frame stutter, not intentional anti-robotic jitter; `familiar_protocol` is BLE encode/decode only, not mic/inference; confidence-hold timer resets on successfully sent frames only, not suppressed/gated ones.
