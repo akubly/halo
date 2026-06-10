@@ -238,7 +238,7 @@ These are **explicit go/no-go gates**: if a gap cannot be resolved before its mi
 | `0x00–0x7F` | Device → Host | Notifications and ACKs originating on device |
 | `0x80–0xFF` | Host → Device | Commands originating on host |
 
-**Endianness:** All multi-byte fields are **little-endian (LE)**. This is idiomatic for BLE (ATT layer is LE) and for the ARM Cortex-M55 on Halo. Host Python uses `struct.pack('<HH', ...)` ; device Lua uses `string.pack('<I2', seq)` / `string.unpack('<I2', data, offset)`.
+**Endianness:** All multi-byte fields are **little-endian (LE)**. This is idiomatic for BLE (ATT layer is LE) and for the ARM Cortex-M55 on Halo. Host Python uses `struct.pack('<H', seq)` for a single uint16 field; device Lua uses `string.pack('<I2', seq)` / `string.unpack('<I2', data, offset)`.
 
 **Wire formats (all fit in a single BLE packet):**
 ```
@@ -380,7 +380,7 @@ def compute_mood(audio_rms, audio_pitch_variance, imu_acceleration, imu_rotation
 - Better to show stale-but-correct than fresh-but-wrong
 - "Silence is safer than hallucination"
 - **The host is the single authority for confidence gating.** Device-side gating, if any, is optional defense-in-depth and not required behavior.
-- Note: the neutral branch returns confidence 0.6 (below gate) by design — neutral is only sent via the confidence-hold timeout below.
+- Note: NEUTRAL is reachable by two distinct paths: (a) **Both-sensors-fail fallback** — if both mic and IMU fail for >10s, the host sends NEUTRAL explicitly (see §5.3 Fallback); (b) **Confidence-hold timeout** — after ~30s of gate-suppressed silence, the host resends the *last computed mood* (which may be neutral, calm, or stressed — not specifically NEUTRAL) at sub-threshold confidence. These paths are independent.
 
 **Confidence-hold timeout (I2):**
 - If confidence gating has suppressed all updates for ~30s continuously, the host sends the last computed mood even if confidence < 0.7. This prevents the creature being permanently frozen in a stale state (see §8: *Stuck-in-stressed* failure mode).
@@ -442,11 +442,11 @@ def compute_mood(audio_rms, audio_pitch_variance, imu_acceleration, imu_rotation
 
 2. **Anti-robotic jitter:** Visual animation includes 5-10% random jitter as visual polish to avoid mechanical, obviously-algorithmic motion — this is **not** a privacy protection mechanism. An informed observer who knows the creature is mood-linked can infer approximate mood state from behavior. Real privacy protection comes from: (a) **obscurity** — the creature is not obviously mood-linked to casual bystanders; and (b) **abstraction** — no text, numbers, or explicit emotion labels are ever displayed.
 
-3. **On-device inference:** Mood calculation runs on host app; raw audio/IMU never leaves the host→device BLE pipe. No cloud telemetry of embodied signals. Camera explicitly deferred to Phase 2.
+3. **On-device inference:** Mood calculation runs on host app; raw audio/IMU never leaves the host at all — only the derived mood/intensity/confidence/seq is transmitted over BLE to the device. No cloud telemetry of embodied signals. Camera explicitly deferred to Phase 2.
 
 4. **Desktop mic indicator:** v1 captures mic on the host desktop machine — recording indicator is OS-managed (e.g. macOS/Windows mic-in-use indicator in system tray). No additional in-app indicator is required for v1.
 
-5. **BLE privacy:** `FAMILIAR_UPDATE` messages contain only mood enum + intensity — no raw biometric values. BLE is **unauthenticated and unencrypted**: mood state is readable and packets are injectable by a nearby BLE scanner. This is accepted for a single-user playground demo. Phase-2 should consider LESC (LE Secure Connections) pairing for production use.
+5. **BLE privacy:** `FAMILIAR_UPDATE` messages contain mood_enum, intensity, confidence, and seq — no raw biometric values. BLE is **unauthenticated and unencrypted**: mood state is readable and packets are injectable by a nearby BLE scanner. This is accepted for a single-user playground demo. Phase-2 should consider LESC (LE Secure Connections) pairing for production use.
 
 **Mic buffer discipline (I7):** `sensors.py` holds ≤1s rolling audio window; buffer zeroed after feature extraction; `SensorSourcePort` exposes extracted features only; raw audio logging prohibited. (Full constraint spec in §5.3.)
 
@@ -562,7 +562,7 @@ def compute_mood(audio_rms, audio_pitch_variance, imu_acceleration, imu_rotation
 | Week 3 | **SDK gates: IMU interrupt + heap API** | Ng confirms `frame.imu.on_tap` availability and `frame.system.get_heap_usage()` | IMU fallback: debounced poll loop; heap fallback: manual allocation tracking (see §5.1 gate table) |
 
 **Success criteria (locked):**
-- Week 1: Emulator or real device renders bobbing sprite from ≥10 mock FAMILIAR_UPDATE packets; BLE send/receive log is clean with no errors; creature bobs without jitter
+- Week 1: Emulator or real device renders bobbing sprite from ≥10 mock FAMILIAR_UPDATE packets; BLE send/receive log is clean with no errors; creature bobs without frame stutter or dropped-frame judder (intentional 5–10% anti-robotic jitter is expected and correct)
 - Week 2: Aaron can trigger stress state by raising voice in quiet room; stressed visual (faster breathing, warm color) appears within 500ms
 - Week 3: Aaron feels creature is "alive" (not robotic) after 1 hour of wear; gesture resets work; no OOM or BLE freeze during session
 

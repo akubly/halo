@@ -5,7 +5,7 @@
 | **Status** | REVISED |
 | **Date** | 2026-06-09 |
 | **Author** | Juanita (Tester / QA) |
-| **ARD reference** | docs/projects/synesthetic-familiar/ARD.md (approved 2026-06-07, amended 2026-06-08) |
+| **ARD reference** | docs/projects/synesthetic-familiar/ARD.md (approved 2026-06-07, amended 2026-06-09) |
 | **School** | London (mockist) TDD — outside-in, Red→Green→Refactor; DELIBERATELY classicist for pure-function units |
 
 ---
@@ -1480,7 +1480,7 @@ jobs:
   slow:                     # PR merge gate, ~3min
     - pytest -m "integration"   # requires halo-emulator
     - pytest --cov --cov-report=term-missing
-    - pytest --cov-fail-under=95 host/familiar_protocol.py  # selective gate: wire format only
+    - pytest --cov=host/familiar_protocol --cov-fail-under=95 tests/test_protocol.py  # selective gate: wire format only
 
   device:                   # Manual trigger only
     # pytest -m "device"    # NOT in automated CI
@@ -1587,7 +1587,7 @@ before the corresponding tests can be enabled:
 | 1 | `frame.system.get_heap_usage()` emulator API existence unconfirmed | Heap exhaustion tests (§6.3) are gated behind `@pytest.mark.skip` / `pending()` | ARD §10 Q3 |
 | 2 | `emulator.set_heap_usage()` API availability | Required for integration-tier heap tests; blocked until halo-emulator confirms | halo-emulator SDK |
 | 3 | `frame.on_imu_peak(callback)` is polling-only in current SDK | NG-T2-2 attention-moment tests must use polling simulation, not interrupt-style callback | ARD §5.1 |
-| 4 | Baseline persistence medium unspecified (on-device flash vs. host filesystem) | LIBRARIAN-T2-2 persistence tests cannot be completed until decided | ARD §10 Q4 |
+| 4 | ~~Baseline persistence medium~~ — **RESOLVED:** Host filesystem (`~/.vesper/baseline.json`), locked in ARD §5.4 / ARD §10 Q4. LIBRARIAN-T2-2 persistence tests may proceed against that path. | n/a | ARD §5.4 |
 | 5 | Lua animation jitter: whether `state_machine.lua` exposes a seedable RNG seam | Jitter bound tests (§6.8) require injectable RNG; if not supported, `math.randomseed` global must be used | ARD §5.6 |
 | 6 | Canonical sprite pixel-buffer format (bit depth, row-major vs column-major, palette encoding) | Framebuffer assertions in §7.4 use assumed format; pixel-count helpers may be wrong | halo-emulator SDK |
 | 7 | IMU interrupt primitive — is there a tap-event subscription API or only polling? | Affects how JUANITA-T2-5 quick-reset is tested at integration tier | ARD §5.1, halo-emulator SDK |

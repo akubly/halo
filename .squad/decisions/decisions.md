@@ -790,7 +790,7 @@ If either is absent, RAVEN vetoes the merge.
 
 **NOT selected:** Phone as host (rejected due to battery/drift concerns). Device-side IMU-only inference (rejected; host retains gating authority).
 
-**Implication:** Host owns the full inference gate; device streams IMU wirelessly; desktop mic provides audio input to familiar_protocol.
+**Implication:** Host owns the full inference gate; device streams IMU wirelessly; desktop mic feeds the sensor/inference pipeline (`sensors.py` → `inference.py`). `familiar_protocol` is only the BLE wire encode/decode layer and carries derived mood/intensity/confidence/seq — it has no mic or inference role.
 
 ---
 
@@ -803,7 +803,7 @@ If either is absent, RAVEN vetoes the merge.
 **Mechanism:**
 - Timer armed: when gate suppresses a frame (confidence ≤ threshold)
 - Timer fires: at ~30s, send `(last_computed_mood, intensity, confidence_sub_threshold, seq++)`
-- Timer reset: on any frame sent (gated or not)
+- Timer reset: on any successfully sent update (including the timeout resend itself); suppressed/gated frames do NOT reset the timer
 
 **Outcome:** Wearer sees one visual update after 30s even if stuck; gate retains authority; confidence remains below merge threshold.
 
