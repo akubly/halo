@@ -801,7 +801,7 @@ def test_confidence_hold_timeout_resends_last_mood_after_30s():
     I2 — Confidence-hold timeout (FakeClock-driven).
     GIVEN host established STRESSED (high-confidence), then enters ~30s of sub-0.7
     WHEN FakeClock advances past ~30s of gated silence
-    THEN host re-sends the last confirmed mood (STRESSED) rather than staying silent.
+    THEN host re-sends the last computed mood (STRESSED) rather than staying silent.
     Creature must not stay "stuck" forever on a confident wearer.
     """
     transport = FakeTransport()
