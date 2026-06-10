@@ -83,7 +83,7 @@
 | NG-T2-1 | Drive animation from host sensor data | BLE/SDK | P0 |
 | NG-T2-2 | On-device sensor events (IMU peak) | Lua hooks | P1 |
 | JUANITA-T2-1 | Animation graceful degradation | Lua render | P1 |
-| JUANITA-T2-2 | Offline mode when cloud fails | Host inference | P0 |
+| JUANITA-T2-2 | Resilient mode on sensor/BLE loss or degraded inference | Host inference | P0 |
 | JUANITA-T2-3 | Lua heap exhaustion handling | Lua runtime | P2 |
 | JUANITA-T2-5 | Quick-reset gesture | Lua input — device-owned | P1 |
 | RAVEN-T2-1 | Abstract visuals — no biometric leak | Design constraint | P0 |

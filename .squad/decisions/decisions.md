@@ -825,7 +825,7 @@ If either is absent, RAVEN vetoes the merge.
 
 **Status:** Retain existing 60-second CALM sustain window from ARD (with updated test coverage).
 
-**Test addition:** Busted `test_calm_sustain_timing_exhaustive` added to cover edge cases (59.9s, 60.0s, 60.1s transitions).
+**Test addition:** Busted `test_calm_sustain_timing_exhaustive` added to cover packet-count boundary (590 vs 600 packets = 59s vs 60s at 10 Hz).
 
 **Outcome:** Wearer experience stable; test harness now validates timing precisely.
 

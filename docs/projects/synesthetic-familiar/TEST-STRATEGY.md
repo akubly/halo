@@ -1456,7 +1456,7 @@ markers = [
 
 **Coverage targets:**
 - `inference.py`: 95% line coverage (pure heuristic logic)
-- `familiar_protocol.py`: 100% line coverage (wire format is safety-critical)
+- `familiar_protocol.py`: 95% line coverage (wire format is safety-critical; 95% enforced as CI gate)
 - `sensors.py`: 85% line coverage (hardware paths are integration-tested)
 - `main.py`: 80% line coverage (orchestration; harder to cover all reconnect paths)
 - No global coverage gate in CI — selective 95% enforced on `familiar_protocol.py` only (see CI pipeline below)
