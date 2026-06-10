@@ -774,3 +774,88 @@ committed.
 If either is absent, RAVEN vetoes the merge.
 
 ---
+
+## 2026-06-09: VESPER Foundation Architecture & Test Strategy — Aaron Decisions
+
+| Field | Value |
+|-------|-------|
+| **Author** | Aaron Kubly |
+| **Date** | 2026-06-09 |
+| **Status** | DECIDED |
+| **Context** | ARD + TEST-STRATEGY persona-review remediations (Design Panel + verification cycles) |
+
+### Decision 1: VESPER v1 Sensor Topology
+
+**Selected:** Desktop Python host with desktop mic + Halo IMU relay (via BLE).
+
+**NOT selected:** Phone as host (rejected due to battery/drift concerns). Device-side IMU-only inference (rejected; host retains gating authority).
+
+**Implication:** Host owns the full inference gate; device streams IMU wirelessly; desktop mic provides audio input to familiar_protocol.
+
+---
+
+### Decision 2: Stuck-in-Stressed Fallback — Confidence-Hold Timeout
+
+**Problem:** Sustained high-confidence STRESSED can trap wearer in visual feedback loop; manual mood override risks confidence-gating ineffectiveness.
+
+**Solution:** After ~30 seconds of gate-suppressed silence (no update sent), host sends last COMPUTED mood at sub-threshold confidence. This allows recovery without abandoning the gate.
+
+**Mechanism:**
+- Timer armed: when gate suppresses a frame (confidence ≤ threshold)
+- Timer fires: at ~30s, send `(last_computed_mood, intensity, confidence_sub_threshold, seq++)`
+- Timer reset: on any frame sent (gated or not)
+
+**Outcome:** Wearer sees one visual update after 30s even if stuck; gate retains authority; confidence remains below merge threshold.
+
+---
+
+### Decision 3: BLE-Drop Fallback — Neutral-Only, No Device-Side IMU Inference
+
+**Problem:** Dropped BLE → device has local IMU but no host gating authority. Risk: device infers stress incorrectly without host context.
+
+**Solution:** On BLE drop (no FAMILIAR_UPDATE for 10s), device reverts to NEUTRAL only. Host regains authority on reconnect.
+
+**NOT allowed:** Device-side IMU-only inference (rejected). Device cannot infer mood independently.
+
+**Outcome:** Safety fallback is conservative (neutral); host authority is not overridden; reconnection restores full inference.
+
+---
+
+### Decision 4: CALM 60-Second Sustain Behavior — KEPT
+
+**Status:** Retain existing 60-second CALM sustain window from ARD (with updated test coverage).
+
+**Test addition:** Busted `test_calm_sustain_timing_exhaustive` added to cover edge cases (59.9s, 60.0s, 60.1s transitions).
+
+**Outcome:** Wearer experience stable; test harness now validates timing precisely.
+
+---
+
+### Decision 5: Test-Strategy Trim — Selective Coverage & Lua Authority
+
+**Dropped hypothesis property tests:**
+- Hypothesis + Lupa cross-validation removed (low signal, high maintenance).
+
+**Dropped global 90% coverage gate:**
+- Replaced with selective **95% on familiar_protocol.py** (where privacy + wire encoding live).
+- Non-critical modules (UI harness, logging) drop to default ~70%.
+
+**Lua sole authority:** Busted remains the canonical test engine for Lua (no Python-based Lua mocking).
+
+**Outcome:** Test suite is lean, maintainable, and focused on high-risk code paths.
+
+---
+
+### Decision 6: Baseline Persistence — Phase 1 (Host Filesystem)
+
+**Phase 1 mechanism:** Host persists baseline to `~/.vesper/baseline.json` (host-local filesystem).
+
+**Not Phase 1:** Cloud sync, multi-device baseline sharing, encrypted vault.
+
+**Rationale:** Simplifies Phase 1; enables offline operation; defers cloud sync decision to Phase 2 PRD.
+
+**Implementation:** Host writes `baseline.json` after successful inference cycle (friendly mood + confidence ≥ threshold).
+
+**Outcome:** Baseline persists across restarts; Phase 2 can add cloud sync without rework.
+
+---

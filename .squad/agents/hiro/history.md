@@ -180,3 +180,22 @@ Shared: `sensors.py`, `inference.py`, `tests/test_inference.py` (stubs ready for
 
 **Outcome:** Week 1 "It moves" software foundation complete. 54 tests passing. Hardware validation pending.
 
+---
+
+## Session 2026-06-09: VESPER ARD Persona-Review Remediation
+
+Applied 15 accepted findings (B1, B2, I1, I2, I4, I5, I6, I7, I9, I12, M1–M5) to ARD.md.
+
+### Learnings
+
+1. **Topology must name the real adapter, not the conceptual one.** "Phone mic" survived in the ARD even after the topology was decided as "desktop Python host." Every topology statement in §4, §5.3, and §5.6 must match the real adapter. When topology changes, grep every section.
+
+2. **ATTENTION is an overlay, not a peer state.** A state that must return to the prior state is semantically an overlay/interrupt, not a reachable peer. Modeling it as a peer causes incorrect reset behavior. Ask: "does this state know where it came from?" — if yes, it's an overlay.
+
+3. **"Open but not blocking" is a debt statement, not a risk management strategy.** Three SDK gaps were critical-path but labeled non-blocking. Reclassifying them as go/no-go gates with fallback designs turns vague risk into actionable gates. Rule: if a gap missing would block a milestone, it's a gate.
+
+4. **Confidence gating and liveness are in tension.** The confidence gate (< 0.7 → suppress) is correct for accuracy, but without a timeout it creates a stuck-creature failure mode. The ~30s confidence-hold timeout resolves the tension without weakening the gate. Both invariants coexist.
+
+5. **Jitter is not privacy.** Visual jitter provides anti-robotic animation polish; it does not protect against an informed observer. Conflating the two weakens the honest privacy posture. Real protection = obscurity + abstraction.
+
+6. **Storage strategy must be locked before tests can be written.** Baseline persistence was "Phase 1 can use host filesystem" but was never locked. Juanita's test was blocked. Rule: if a test references a storage layer, the ARD must name it explicitly.

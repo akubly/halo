@@ -41,3 +41,24 @@
 **Critical insight:** Tests == executable specification. The test contract defines what the wire format means. Ng's implementation must match test expectations, not the other way around.
 
 **Outcome:** 54-test green. Wire format fully verified. Ready for hardware validation.
+
+## Session 2026-06-09: VESPER Test Strategy Rev 3 — Persona-Review Remediation Wave
+
+Applied 9 persona-review findings to TEST-STRATEGY.md. All changes surgical; mixed-methodology framing preserved.
+
+## Learnings (continued)
+
+### Parametrize beats Hypothesis for boundary coverage (2026-06-09)
+- `hypothesis` is heavyweight for a pure-function heuristic with known boundaries. An explicit `@pytest.mark.parametrize` table (~8 rows covering nominal + boundary per mood) is easier to read, faster to run, and requires no extra dependency. Use hypothesis only when you cannot enumerate the input space.
+
+### `busted` is the SOLE Lua authority — no Python-clone oracles (2026-06-09)
+- A Python reimplementation of Lua state machine logic (LuaStateMachineSim) only validates itself. It says nothing about production Lua. If cross-language fuzz is needed in Phase-2, drive it through a real Lua interpreter (busted fixtures or subprocess). Never substitute a Python clone.
+
+### ATTENTION is overlay-and-restore, NOT overlay-and-neutral (2026-06-09)
+- on_imu_peak() overlays ATTENTION briefly (<=500ms), then restores the *previous* mood (e.g., STRESSED → ATTENTION → STRESSED). It does NOT reset to NEUTRAL. This is architecturally important: ATTENTION is ephemeral emphasis, not a mood transition.
+
+### Confidence-hold timeout belongs in Phase-1 (2026-06-09)
+- The "stuck creature" scenario (prolonged sub-0.7 confidence → creature frozen) is a Phase-1 UX failure, not a Phase-2 enhancement. After ~30s of gated silence, re-send the last confirmed mood. FakeClock-driven tests can cover this without time.sleep().
+
+### Global coverage gates are a false safety signal (2026-06-09)
+- `--cov-fail-under=90` on the whole test suite can pass with 100% coverage of trivial files masking 60% on critical ones. A selective gate on the single most important module (familiar_protocol.py at 95%) is more honest and actionable than a blunt global threshold.
