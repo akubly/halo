@@ -16,6 +16,7 @@
 | 2026-06-07 | Initial ARD authored and approved | Hiro |
 | 2026-06-08 | Architecture clarifications (heap ownership, quick-reset ownership, confidence-gating authority) — post-test-strategy review | Hiro |
 | 2026-06-08 | BLE wire-format spec finalized (endianness, seq wraparound/dedup, FAMILIAR_RESET as device→host, ACK cadence) — Ng |
+| 2026-06-09 | Persona-review fixes: topology → desktop mic + Halo IMU relay; ATTENTION as transient overlay; confidence-hold timeout; fallback neutral-only (no device IMU inference); SDK gaps → explicit go/no-go gates; YT-T2-2 deferred to Phase 2; jitter honesty; mic buffer constraint; structured logging; baseline persistence locked; minor M1–M5 | Hiro |
 
 ---
 
@@ -79,7 +80,6 @@
 | LIBRARIAN-T2-2 | Learn wearer baseline | Host inference | P1 |
 | LIBRARIAN-T2-5-ERROR | Don't hallucinate mood (silence > wrong) | Confidence gating | P0 |
 | YT-T2-1 | First launch — meet your Familiar | Host app UX | P0 |
-| YT-T2-2 | Notice stress before wearer feels it | Host inference | P1 |
 | NG-T2-1 | Drive animation from host sensor data | BLE/SDK | P0 |
 | NG-T2-2 | On-device sensor events (IMU peak) | Lua hooks | P1 |
 | JUANITA-T2-1 | Animation graceful degradation | Lua render | P1 |
@@ -96,6 +96,7 @@
 
 | Story ID | Reason |
 |----------|--------|
+| YT-T2-2 | **Phase 2 — deferred.** Predictive/early-warning stress inference requires a stable personal baseline and extended longitudinal validation not feasible in v1. No v1 test or Definition of Done. |
 | YT-T2-3, YT-T2-4, YT-T2-5 | Personality/evolution/surprises require baseline learning |
 | NG-T2-3, NG-T2-4 | Sprite upload + test harness are Phase 2 polish |
 | NG-T2-5 | True sensor fusion requires ML infrastructure |
@@ -133,7 +134,7 @@
 │                          └─────────────────┘   └────────┬────────┘  │
 │  ┌───────────────────┐                                  │           │
 │  │ Local IMU Events  │──────────────────────────────────┘           │
-│  │ (motion peaks)    │  (optional: supplement host mood)            │
+│  │ (motion peaks)    │  (ATTENTION trigger: jump-on-peak only)      │
 │  └───────────────────┘                                              │
 │                                    │                                │
 │                                    ▼                                │
@@ -146,13 +147,13 @@
 
 ### Data Flow (per cycle, 10Hz)
 
-1. **Host captures** mic audio + IMU from phone (or Halo BLE relay)
+1. **Host captures** mic audio from desktop mic + IMU relayed from Halo via BLE
 2. **Host computes** mood vector: `{ energy: 0-1, valence: 0-1, tension: 0-1 }`
 3. **Host applies** confidence gate: if confidence < 0.7, hold current state
 4. **Host sends** BLE message: `FAMILIAR_UPDATE { mood_enum, intensity, confidence }`
 5. **Device receives** message, interpolates to new state over 200-500ms
 6. **Device renders** sprite at 15-30fps, updates breathing/color/position
-7. **Device optionally** supplements with local IMU peak events (jump-on-motion)
+7. **Device triggers** ATTENTION overlay on local IMU peak events (jump-on-motion); no device-side mood inference
 
 ### Autonomy Tier Decision
 
@@ -160,12 +161,12 @@
 
 | Component | Location | Rationale |
 |-----------|----------|-----------|
-| Sensor capture | Host (phone mic/IMU) or device relay | Phone has better mic; device IMU is supplementary |
+| Sensor capture | Desktop mic (host) + Halo IMU relay via BLE | Desktop mic captures audio; Halo relays IMU to host via BLE |
 | Mood inference | **Host (local heuristic)** | M55 NPU is for gate-keeping, not inference (LIBRARIAN finding). Latency budget 200-500ms acceptable. Cloud deferred to Phase 2. |
 | Confidence gating | **Host** | "Silence is safer than wrong" (LIBRARIAN-T2-5-ERROR). **Host is the single authority; any device-side gating is optional defense-in-depth, not required behavior.** |
 | State interpolation | **Device** | Smooth animation must be local; BLE latency too high |
 | Sprite rendering | **Device** | Display is on-device; Lua render loop |
-| Fallback on BLE drop | **Device** | Local IMU-only inference, then neutral state after 10s |
+| Fallback on BLE drop | **Device** | Neutral-only state after 10s; no device-side IMU-only inference |
 
 **Why not on-device ML? Why not cloud?** The M55 NPU is optimized for wake-word detection and simple gating, not real-time multimodal inference. Cloud latency (500-2000ms) breaks the "alive" illusion for an ambient display. We follow Brilliant's architecture and keep inference on host locally. Phase 2 can explore cloud refinement for longer-term insights.
 
@@ -181,9 +182,9 @@
 - Receive `FAMILIAR_UPDATE` messages via BLE
 - Interpolate mood state smoothly (200-500ms transitions)
 - Render sprite at 15-30fps depending on complexity
-- Handle local IMU events (`on_imu_peak`) for motion-triggered reactions
-- Manage graceful degradation: if no BLE update for 10s, enter neutral state
-- Respect heap budget: <80% usage triggers reduced animation complexity; safe-halt at 95%. **Heap management is device-local; not reflected in any host-bound message** — FAMILIAR_ACK carries seq only, no heap flag.
+- Handle local IMU events (`on_imu_peak`) for motion-triggered ATTENTION reactions only — no mood inference on device
+- Manage graceful degradation: if no BLE update for 10s, enter neutral state (no IMU-only mood inference fallback)
+- Respect heap budget: <80% usage triggers reduced animation complexity; safe-halt at 95%. *(Thresholds 80%/95% are initial estimates; tune on real device.)* **Heap management is device-local; not reflected in any host-bound message** — FAMILIAR_ACK carries seq only, no heap flag.
 
 **Sprite specification (per DASID-T2-1):**
 - Size: 24×24 pixels (expandable to 48×48 in Phase 2)
@@ -196,13 +197,20 @@
 ```
 NEUTRAL (default) ─┬─▶ CALM (low tension, sustained 60s)
                    └─▶ STRESSED (high tension, threshold breach)
-                   └─▶ ATTENTION (event triggered, 500ms)
+
+Any state ──────────▶ ATTENTION overlay (500ms) ──▶ previous_state
+                      (not a peer state; does not reset to NEUTRAL)
 ```
 
-**SDK gaps to address (per NG-T2-*):**
-- Need `frame.on_imu_peak(callback)` for motion events (current SDK is polling-only)
-- Need sprite animation sequencing primitive (workaround: pre-baked keyframes)
-- Need heap monitoring: `frame.system.get_heap_usage()`
+**SDK go/no-go gates (per NG-T2-*):**
+
+| Gap | Critical Path | Go/No-Go Milestone | Fallback Design |
+|-----|---------------|--------------------|-----------------|
+| `frame.imu.on_tap` / `frame.on_imu_peak` interrupt callback (current SDK is polling-only) | Week 3 (double-tap FAMILIAR_RESET; ATTENTION trigger) | Before Week 3 merge | Debounced poll loop at ≤50ms; if no interrupt support, ATTENTION trigger silently disabled in v1 |
+| Sprite pixel-buffer format for `bitmap()` (indexed 4-bit, RGB565, or RLE — unconfirmed) | Week 1 (rendering; asset pipeline) | Before Week 1 sign-off | `set_pixel()` per-pixel loop as confirmed-correct baseline; Week-1 fallback = simplest indexed format confirmed with Brilliant; switch to `bitmap()` once format locked |
+| Heap monitoring: `frame.system.get_heap_usage()` (not confirmed in current Lua stdlib) | Week 3 (heap guard 80%/95%) | Before Week 3 merge | Manual allocation tracking: count sprite rows + BLE buffer bytes as proxy; thresholds remain 80%/95% |
+
+These are **explicit go/no-go gates**: if a gap cannot be resolved before its milestone, the dependent feature is blocked until the gap is closed or the fallback is accepted as the v1 design. (See also §10 for investigation assignments.)
 
 **Frame→Halo gotchas (per decisions.md):**
 - Call `frame.display.power_save(false)` at startup
@@ -283,6 +291,8 @@ The device sends `FAMILIAR_ACK` automatically after every **10 accepted `FAMILIA
 - `brilliant-msg` (Python): Message encoding/decoding
 - **Version pinning:** Use latest stable; test for wire format compatibility
 
+**Host reconnect policy (M1):** After N consecutive `FAMILIAR_UPDATE` packets sent without a corresponding `FAMILIAR_ACK` (suggested N=30, ≈3s at 10Hz), the host logs a warning, reduces send rate, and initiates BLE reconnection.
+
 **Known gaps:**
 - No `FAMILIAR_UPDATE` opcode exists — must define custom message type
 - No sprite animation primitive — Lua must implement keyframe logic
@@ -314,10 +324,19 @@ synesthetic-familiar/
     └── test_protocol.py     # BLE message tests
 ```
 
-**Sensor capture (Mic + IMU only):**
-- Mic: PyAudio or sounddevice, 16kHz, mono (from host phone)
+**Sensor capture (Desktop mic + Halo IMU relay):**
+- Mic: PyAudio or sounddevice, 16kHz, mono (desktop mic on host machine)
 - IMU: Relay from Halo via BLE (existing SDK support)
 - Camera: Explicitly deferred to Phase 2 (no v1 scope)
+
+**Mic buffer constraint (privacy):**
+- `sensors.py` holds ≤1s rolling audio window; buffer is zeroed immediately after feature extraction
+- `SensorSourcePort` returns only extracted features (RMS, pitch variance) — never raw audio samples
+- Raw audio logging and `.wav` dumps are prohibited; no audio data may be written to disk or transmitted over any network
+
+**Structured logging requirement:**
+- Host emits structured `DEBUG` log per inference cycle: `{mood, intensity, confidence, action: sent|suppressed}`
+- Host emits structured `DEBUG` log per BLE event: `{event: send|error|reconnect, seq, timestamp}`
 
 **Dependencies:**
 - `brilliant-ble` (BSD-3-Clause, compatible)
@@ -361,11 +380,20 @@ def compute_mood(audio_rms, audio_pitch_variance, imu_acceleration, imu_rotation
 - Better to show stale-but-correct than fresh-but-wrong
 - "Silence is safer than hallucination"
 - **The host is the single authority for confidence gating.** Device-side gating, if any, is optional defense-in-depth and not required behavior.
+- Note: the neutral branch returns confidence 0.6 (below gate) by design — neutral is only sent via the confidence-hold timeout below.
+
+**Confidence-hold timeout (I2):**
+- If confidence gating has suppressed all updates for ~30s continuously, the host sends the last computed mood even if confidence < 0.7. This prevents the creature being permanently frozen in a stale state (see §8: *Stuck-in-stressed* failure mode).
+- The 30s timer resets on any successfully sent update.
 
 **Baseline learning (Phase 1 simplified):**
 - First 3 days: use population defaults
 - After day 3: compute wearer's personal mean/stddev
 - Stress threshold = personal_mean + 1.5σ
+
+**Baseline persistence (Phase 1 — locked):** Wearer personal baseline (mean, stddev) is stored on **host filesystem** (e.g., `~/.vesper/baseline.json`). This is the canonical Phase-1 storage strategy; Phase-2 may migrate to on-device flash or cloud sync. *(Unblocks the dependent TEST-STRATEGY test.)*
+
+> **Phase-1 cloud trust posture:** "No cloud" is enforced by code review — no cloud SDK imports in Phase-1 source. Juanita may add a light import guard in CI to prevent accidental cloud dependency creeping in.
 
 **Fallback (JUANITA-T2-2):**
 - If mic fails: use IMU-only (reduced confidence)
@@ -412,20 +440,23 @@ def compute_mood(audio_rms, audio_pitch_variance, imu_acceleration, imu_rotation
 
 1. **Abstract visuals:** Creature animation uses breathing/orbit/bloom — no labeled emotions visible to bystanders. "Calm" text is internal; bystander sees unlabeled motion.
 
-2. **No biometric leak:** Visual pattern includes 5-10% random jitter to prevent statistical inference of wearer state by observers.
+2. **Anti-robotic jitter:** Visual animation includes 5-10% random jitter as visual polish to avoid mechanical, obviously-algorithmic motion — this is **not** a privacy protection mechanism. An informed observer who knows the creature is mood-linked can infer approximate mood state from behavior. Real privacy protection comes from: (a) **obscurity** — the creature is not obviously mood-linked to casual bystanders; and (b) **abstraction** — no text, numbers, or explicit emotion labels are ever displayed.
 
 3. **On-device inference:** Mood calculation runs on host app; raw audio/IMU never leaves the host→device BLE pipe. No cloud telemetry of embodied signals. Camera explicitly deferred to Phase 2.
 
-4. **Mic recording indicator (phone-side):** v1 captures mic on host phone, not Halo — recording indicator is on phone during audio capture, not on glasses. This satisfies privacy mandate for microphone use.
+4. **Desktop mic indicator:** v1 captures mic on the host desktop machine — recording indicator is OS-managed (e.g. macOS/Windows mic-in-use indicator in system tray). No additional in-app indicator is required for v1.
 
-5. **BLE privacy:** FAMILIAR_UPDATE messages contain only mood enum + intensity — no raw biometric values. Message is not encrypted (low sensitivity), but also not broadcast (point-to-point BLE).
+5. **BLE privacy:** `FAMILIAR_UPDATE` messages contain only mood enum + intensity — no raw biometric values. BLE is **unauthenticated and unencrypted**: mood state is readable and packets are injectable by a nearby BLE scanner. This is accepted for a single-user playground demo. Phase-2 should consider LESC (LE Secure Connections) pairing for production use.
+
+**Mic buffer discipline (I7):** `sensors.py` holds ≤1s rolling audio window; buffer zeroed after feature extraction; `SensorSourcePort` exposes extracted features only; raw audio logging prohibited. (Full constraint spec in §5.3.)
 
 **Privacy audit checklist:**
-- [ ] No raw audio samples leave host app
+- [ ] No raw audio samples persist beyond 1s rolling window; buffer zeroed after feature extraction
 - [ ] No IMU streams stored persistently
 - [ ] FAMILIAR_UPDATE contains no PII
 - [ ] Creature animation is abstract (no emotion labels visible)
-- [ ] Phone mic indicator active during capture
+- [ ] OS-managed desktop mic indicator active during capture
+- [ ] No cloud SDK imports present (trust-by-code-review; see §5.4)
 
 ---
 
@@ -505,12 +536,13 @@ def compute_mood(audio_rms, audio_pitch_variance, imu_acceleration, imu_rotation
 |------|------------|--------|------------|
 | **Emotion inference lag** — creature shows stress 5s after wearer feels it | Medium | Medium | Use 10Hz update rate; tune thresholds for responsiveness over precision (LIBRARIAN-T2-5-ERROR: false negatives > false positives); optimize local heuristic weights |
 | **Display can't keep up** — animation stutters under load | Low | Medium | Frame-skip gracefully (JUANITA-T2-1); cap at 15fps if needed; bound animation complexity to 32 sprites |
-| **Model unavailable** — local inference fails | Very low (local only) | Medium | Fallback to IMU-only heuristic; hold last-known state for 10s then neutral; no cloud dependency in v1 |
-| **State leaks to bystanders** — creature reveals wearer stress visibly | Medium | High | Abstract visuals (RAVEN-T2-1); add 5-10% jitter; cap brightness at 50% indoors; eye-based form (not face) limits readability |
-| **Lua heap fills** — long session OOMs device | Low | High | Monitor heap at 80%; reduce animation complexity; safe-halt at 95% (JUANITA-T2-3) |
-| **BLE drops mid-session** — creature freezes | Medium | Medium | Device-side timeout (10s); local IMU fallback; graceful neutral state |
+| **Model unavailable** — local inference fails | Very low (local only) | Medium | Hold last-known state for 10s then neutral; no cloud dependency in v1 |
+| **State leaks to bystanders** — creature reveals wearer stress visibly | Medium | High | Abstract visuals (RAVEN-T2-1); add 5-10% jitter (anti-robotic polish); cap brightness at 50% indoors; eye-based form (not face) limits readability |
+| **Lua heap fills** — long session OOMs device | Low | High | Monitor heap at 80%; reduce animation complexity; safe-halt at 95% (JUANITA-T2-3). *(Thresholds 80%/95% are initial estimates; tune on real device.)* |
+| **BLE drops mid-session** — creature freezes | Medium | Medium | Device-side timeout (10s): if no BLE update received for 10s, device enters neutral state; no device-side IMU mood inference |
 | **Mood hallucination** — creature thrashes when wearer is calm | Medium | Medium | Confidence gating (LIBRARIAN); quick-reset gesture (JUANITA-T2-5); baseline learning after day 3 |
 | **Mic capture noise** — inference confused by background sounds | Medium | Low | Confidence gating suppresses updates on low-confidence frames; silence > hallucination |
+| **Stuck-in-stressed** — tension drops but confidence stays below 0.7 gate; creature never returns to neutral | Medium | Medium | Confidence-hold timeout (~30s): after 30s of continuously suppressed updates, host sends last computed mood regardless of gate; creature unfreezes |
 
 ---
 
@@ -522,13 +554,15 @@ def compute_mood(audio_rms, audio_pitch_variance, imu_acceleration, imu_rotation
 |------|-----------|-------------|-----------------|
 | **Week 1** | **"It moves"** | Lua sprite renders on device; host sends mock FAMILIAR_UPDATE; creature bobs | Python harness + Lua render loop on device; abstract sprite (24×24 geometric form with eye); test BLE wire format |
 | Week 1 | BLE protocol | FAMILIAR_UPDATE message defined and working | Opcode 0x80, mood_enum (0-3), intensity (0-100), confidence (0-100), sequence number |
-| **Week 2** | **"It reacts"** | Host captures mic + IMU (no camera); local heuristic inference; creature reflects mood | Python PyAudio + Halo IMU relay; tone/pitch variance + acceleration + rotation weighting; 10Hz updates to device |
+| Week 1 | **SDK gate: sprite format** | Ng confirms `bitmap()` pixel-buffer format with Brilliant SDK | If unconfirmed, Week 1 ships with `set_pixel()` fallback (correct for any firmware); `bitmap()` unlocked when format known |
+| **Week 2** | **"It reacts"** | Host captures desktop mic + Halo IMU relay; local heuristic inference; creature reflects mood | Python sounddevice (desktop mic) + Halo IMU relay; tone/pitch variance + acceleration + rotation weighting; 10Hz updates to device |
 | Week 2 | Stress/calm states | Visual states per DASID spec (breathing speed ±0.75Hz vs 0.15Hz, color shift warm↔cool) | Lua animation state machine: neutral ↔ calm ↔ stressed; smooth 200-500ms interpolation |
-| **Week 3** | **"It's alive"** | First-launch UX; attention moments (jump-on-peak); quick-reset (double-tap); graceful fallback | Host onboarding flow in Python; device-side IMU-peak callback to `on_imu_peak`; BLE timeout + neutral fallback after 10s |
+| **Week 3** | **"It's alive"** | First-launch UX; attention moments (ATTENTION overlay on IMU peak); quick-reset (double-tap); graceful fallback | Host onboarding flow in Python; device-side IMU-peak callback to `on_imu_peak`; BLE timeout + neutral fallback after 10s |
 | Week 3 | Polish + test | Test on real device; tune confidence thresholds; document | Baseline learning (pop defaults days 1-3, personal mean+1.5σ after); privacy audit checklist ✅; heap monitoring at 80% |
+| Week 3 | **SDK gates: IMU interrupt + heap API** | Ng confirms `frame.imu.on_tap` availability and `frame.system.get_heap_usage()` | IMU fallback: debounced poll loop; heap fallback: manual allocation tracking (see §5.1 gate table) |
 
 **Success criteria (locked):**
-- Week 1: Aaron can see creature bobbing on Halo display without jitter; BLE messages log cleanly
+- Week 1: Emulator or real device renders bobbing sprite from ≥10 mock FAMILIAR_UPDATE packets; BLE send/receive log is clean with no errors; creature bobs without jitter
 - Week 2: Aaron can trigger stress state by raising voice in quiet room; stressed visual (faster breathing, warm color) appears within 500ms
 - Week 3: Aaron feels creature is "alive" (not robotic) after 1 hour of wear; gesture resets work; no OOM or BLE freeze during session
 
@@ -538,13 +572,15 @@ def compute_mood(audio_rms, audio_pitch_variance, imu_acceleration, imu_rotation
 
 *Not decisions for Aaron — requires team follow-up*
 
-1. **IMU event primitive:** Does `brilliant-ble` support interrupt-style IMU callbacks, or must we poll? If polling-only, Lua must implement a debounced tap-detection loop; target latency ≤50ms. (NG to investigate with SDK team)
+> **SDK gaps Q1–Q3 are now explicit go/no-go gates** (reclassified from "open but not blocking"). See §5.1 gate table for fallback designs and milestone assignments. They are listed here for investigation tracking only.
 
-2. **Sprite format:** What is the canonical pixel-buffer format for Lua `bitmap()` calls — indexed 4-bit, raw RGB565, or run-length encoded? Determines sprite asset pipeline. (NG to document from SDK source / Brilliant docs)
+1. **IMU event primitive [go/no-go: Week 3]:** Does `brilliant-ble` support interrupt-style IMU callbacks, or must we poll? If polling-only, Lua must implement a debounced tap-detection loop; target latency ≤50ms. Fallback: debounced poll. (NG to investigate with SDK team)
 
-3. **Heap monitoring:** Is `frame.system.get_heap_usage()` available in current Lua stdlib? If absent, safe-halt threshold must be approximated by tracking allocation sites manually. (NG to verify against current Halo firmware)
+2. **Sprite format [go/no-go: Week 1]:** What is the canonical pixel-buffer format for Lua `bitmap()` calls — indexed 4-bit, raw RGB565, or run-length encoded? Determines sprite asset pipeline. Fallback: `set_pixel()` confirmed-correct baseline. (NG to document from SDK source / Brilliant docs)
 
-4. **Baseline learning persistence:** Where do we store the wearer's personal baseline (mean, stddev) between sessions — on-device flash, host filesystem, or cloud? Phase 1 can use host filesystem; Phase 2 needs a durable strategy. (Aaron + Hiro to decide before Phase 2)
+3. **Heap monitoring [go/no-go: Week 3]:** Is `frame.system.get_heap_usage()` available in current Lua stdlib? If absent, safe-halt threshold must be approximated by tracking allocation sites manually. Fallback: manual allocation tracking. (NG to verify against current Halo firmware)
+
+4. **Baseline learning persistence:** ~~Where do we store the wearer's personal baseline between sessions?~~ **RESOLVED (Phase 1):** Host filesystem (`~/.vesper/baseline.json`). Phase-2 durable strategy deferred. *(See §5.4.)*
 
 5. **Cross-platform parity:** If Phase 2 adds Web Bluetooth, how do we maintain parity with the Python host? Shared mood calculation logic requires a JS port or a shared native library. (Deferred to Phase 2 scoping)
 

@@ -3,7 +3,7 @@
 | Field | Value |
 |-------|-------|
 | **Status** | REVISED |
-| **Date** | 2026-06-08 |
+| **Date** | 2026-06-09 |
 | **Author** | Juanita (Tester / QA) |
 | **ARD reference** | docs/projects/synesthetic-familiar/ARD.md (approved 2026-06-07, amended 2026-06-08) |
 | **School** | London (mockist) TDD — outside-in, Red→Green→Refactor; DELIBERATELY classicist for pure-function units |
@@ -14,7 +14,8 @@
 
 | Date | Author | Summary |
 |------|--------|---------|
-| 2026-06-08 | Juanita | **Rev 2** — Advisory review findings applied. Wire format aligned to resolved ARD (LE endianness, signed-16 wraparound dedup, `FAMILIAR_RESET` opcode 0x01 Device→Host, ACK every 10 accepted packets). Heap ownership corrected to device-only (Lua tier); host/wire heap protocol removed throughout. False-positive bug in `test_low_confidence_frame_below_neutral_band_also_suppressed` fixed (single shared transport). Acceptance tests decoupled from heuristic internals via `inference_fn` injection. Honest mixed-methodology framing added (London-school acceptance, deliberate classicist for pure-function units). `busted` declared authoritative Lua test runner. Quick-reset seam corrected (device-originated). Confidence gating ownership clarified (host = sole authority; device optional). Appendix A ARD gaps updated: wire-format and ownership items marked RESOLVED; genuine open items retained. Story mapping reconciled (YT-T2-2 predictive-inference story removed; RAVEN-T2-1 automated protocol assertion added). Jitter seam and biometric-privacy protocol test added. |
+| 2026-06-09 | Juanita | **Rev 3** — Persona-review remediation wave. I10: `hypothesis` property test on `compute_mood` replaced with `@pytest.mark.parametrize` fixture table; `lupa` Python→Lua cross-validation path removed/deferred; `busted` sole Lua authority; `--cov-fail-under=90` global CI gate removed (selective 95% on `familiar_protocol.py` retained). I1: ATTENTION overlay-and-restore busted test added (§7.2). I2: ~30s confidence-hold timeout test added (FakeClock-driven, §6.4); stuck-creature scenario moved to Phase-1. I3: CALM 60s sustain busted timing test added (§7.2). I5: YT-T2-2 restated as deferred Phase-2 (no v1 test/DoD) in §5; Rev 2 "removed" claim corrected. I8: `compute_mood` output-shape unit test added (§4.1). I11: Deterministic FakeClock-driven interpolation test specified (§6.5). M3: No-network assertion noted (§6.10). M5: Week-1 programmatic emulator gate added (§7.5). |
+| 2026-06-08 | Juanita | **Rev 2** — Advisory review findings applied. Wire format aligned to resolved ARD (LE endianness, signed-16 wraparound dedup, `FAMILIAR_RESET` opcode 0x01 Device→Host, ACK every 10 accepted packets). Heap ownership corrected to device-only (Lua tier); host/wire heap protocol removed throughout. False-positive bug in `test_low_confidence_frame_below_neutral_band_also_suppressed` fixed (single shared transport). Acceptance tests decoupled from heuristic internals via `inference_fn` injection. Honest mixed-methodology framing added (London-school acceptance, deliberate classicist for pure-function units). `busted` declared authoritative Lua test runner. Quick-reset seam corrected (device-originated). Confidence gating ownership clarified (host = sole authority; device optional). Appendix A ARD gaps updated: wire-format and ownership items marked RESOLVED; genuine open items retained. Story mapping reconciled (YT-T2-2 predictive-inference story restated as deferred Phase-2, no v1 test/DoD; RAVEN-T2-1 automated protocol assertion added). Jitter seam and biometric-privacy protocol test added. |
 | 2026-06-08 | Juanita | **Rev 1** — Initial test strategy authored. |
 
 ---
@@ -435,6 +436,18 @@ def test_familiar_update_carries_no_raw_biometric_values():
     assert raw_biometric_params.isdisjoint(params.keys()), (
         f"encode_familiar_update must not accept raw biometric params; got {params.keys()}"
     )
+
+def test_compute_mood_returns_only_expected_keys():
+    """I8/RAVEN-T2-1 inference-output shape: compute_mood must return EXACTLY
+    {mood, intensity, confidence}. No raw sensor values may leak past inference."""
+    result = compute_mood(
+        audio_rms=0.8, audio_pitch_variance=0.9,
+        imu_acceleration=0.7, imu_rotation=0.5
+    )
+    assert set(result.keys()) == {"mood", "intensity", "confidence"}, (
+        f"compute_mood must return only {{mood, intensity, confidence}}; "
+        f"got {set(result.keys())}"
+    )
 ```
 
 **Refactor phase:** Once tests are green, extract `STRESS_THRESHOLD` and
@@ -632,7 +645,7 @@ The clock injection seam is now load-bearing.
 | LIBRARIAN-T2-2 | P1 | Unit | After 3 days of simulated frames, thresholds shift to personal mean±1.5σ |
 | LIBRARIAN-T2-5-ERROR | P0 | Acceptance + Unit | Confidence < 0.7 suppresses send; stale state held; no thrash on ambiguous input |
 | YT-T2-1 | P0 | Acceptance | First-launch flow drives `FamiliarApp` through onboarding sequence; creature appears on emulator before inference starts |
-| YT-T2-2 | P1 | Unit | Baseline adaptation: after accumulating history, `compute_mood` thresholds shift toward personal mean; confidence increases for familiar patterns |
+| YT-T2-2 | P2 — Deferred Phase-2 | — | *(Deferred Phase-2; no v1 test/DoD. Baseline-adaptation / predictive-inference: after accumulating history, `compute_mood` thresholds shift toward personal mean. Out of scope for v1.)* |
 | NG-T2-1 | P0 | Acceptance + Unit | Host sensor data produces correct wire-format FAMILIAR_UPDATE (opcode 0x80, mood_enum 0-3, intensity, confidence, seq) |
 | NG-T2-2 | P1 | Integration | `on_imu_peak` callback triggers ATTENTION mood; emulator IMU injection → jump animation observed in framebuffer |
 | JUANITA-T2-1 | P1 | Integration + Manual | Frame-skipping under load: at >50ms/frame, Lua drops to 15fps without visual freeze; emulator timing |
@@ -775,10 +788,55 @@ def test_prolonged_low_confidence_does_not_thrash():
     assert transport.packet_count() == 0  # silence > hallucination
 ```
 
-**Design implication:** If thrashing is unacceptable UX, add a
-"confidence-hold timeout" — after N seconds of gated silence, send the last
-computed mood even at sub-threshold confidence. This is a Phase 2 design
-decision; the test above documents the current gate-always behavior.
+**Confidence-hold timeout (Phase-1, ARD §5.4):** After ~30 seconds of gated
+silence (sustained sub-0.7 confidence), the host re-sends the last confirmed
+mood rather than leaving the creature stuck. This is the confirmed fix for the
+"stuck creature" scenario — moved to Phase-1 per Aaron's decision 2026-06-09.
+The `test_prolonged_low_confidence_does_not_thrash` test above documents
+correct hold behavior during the window; the test below covers the timeout.
+
+```python
+def test_confidence_hold_timeout_resends_last_mood_after_30s():
+    """
+    I2 — Confidence-hold timeout (FakeClock-driven).
+    GIVEN host established STRESSED (high-confidence), then enters ~30s of sub-0.7
+    WHEN FakeClock advances past ~30s of gated silence
+    THEN host re-sends the last confirmed mood (STRESSED) rather than staying silent.
+    Creature must not stay "stuck" forever on a confident wearer.
+    """
+    transport = FakeTransport()
+    clock = FakeClock(start=0.0)
+    call_count = [0]
+
+    def confidence_scenario(frame):
+        call_count[0] += 1
+        if call_count[0] == 1:
+            return {"mood": "stressed", "intensity": 80, "confidence": 82}
+        return {"mood": "stressed", "intensity": 78, "confidence": 65}  # sub-0.7
+
+    frames = [SensorFrame(audio_rms=0.8, audio_pitch_variance=0.9,
+                          imu_accel=0.7, imu_rot=0.5)]
+    frames += [SensorFrame(audio_rms=0.35, audio_pitch_variance=0.35,
+                           imu_accel=0.34, imu_rot=0.33)] * 35
+    sensor_source = FakeSensorSource(frames=frames)
+    app = FamiliarApp(transport=transport, sensor_source=sensor_source,
+                      clock=clock, inference_fn=confidence_scenario)
+
+    app.run_cycle()                        # establishes STRESSED confidence=82
+    initial_count = transport.packet_count()
+    assert initial_count == 1
+
+    for _ in range(29):                    # 29s of sub-0.7 — still held
+        clock.advance(1.0)
+        app.run_cycle()
+    assert transport.packet_count() == initial_count  # no re-send yet
+
+    clock.advance(1.1)                     # cross the ~30s threshold
+    app.run_cycle()
+    assert transport.packet_count() > initial_count   # last mood re-sent
+    last = transport.last_packet()
+    assert last[1] == 2                    # mood_enum STRESSED — not wiped to NEUTRAL
+```
 
 ### 6.5 Interpolation Timing
 
@@ -786,13 +844,78 @@ decision; the test above documents the current gate-always behavior.
 `CALM` update. The 200-500ms interpolation is mid-flight when the CALM
 arrives. Does the creature snap or blend correctly?
 
-```python
-def test_rapid_mood_change_does_not_snap():
-    """Acceptance: two fast updates followed by CALM — creature blends, not snaps."""
-    # This tests the device-side interpolation, best done in emulator:
-    # emit STRESSED at t=0, STRESSED at t=0.05s, CALM at t=0.1s
-    # Emulator: assert no frame shows full-snap to CALM; pixel delta between
-    # consecutive frames stays within smooth-transition bounds
+**Deterministic FakeClock-driven test (I11):** The ARD specifies 200-500ms
+interpolation. This test uses the `StateMachine` seam with an injectable clock
+to assert concrete intermediate values — not just "no snap" but exact frame
+counts and progress ratios.
+
+```lua
+-- tests/lua/test_state_machine.lua (busted) — I11 interpolation timing
+describe("mood interpolation timing", function()
+
+  it("200ms budget: intensity reaches target within 2 ticks at 10Hz", function()
+    -- ARD §5.1: interpolation completes in 200–500ms.
+    -- StateMachine is driven at 10Hz (100ms/tick).
+    -- After 2 ticks (200ms) intensity must be >= 90% of target.
+    local clock = FakeClock.new(0.0)
+    local sm = StateMachine.new_with_clock(clock)
+    sm:receive({mood=0, intensity=50, confidence=80, seq=1})   -- NEUTRAL baseline
+
+    sm:receive({mood=2, intensity=100, confidence=85, seq=2})  -- STRESSED target
+    clock:advance(0.1)  -- tick 1 (100ms)
+    sm:tick()
+    local progress_1 = sm:current_intensity()
+    assert.is_true(progress_1 > 50,
+      string.format("after 100ms intensity should rise from 50; got %d", progress_1))
+
+    clock:advance(0.1)  -- tick 2 (200ms total)
+    sm:tick()
+    local progress_2 = sm:current_intensity()
+    assert.is_true(progress_2 >= 90,
+      string.format("after 200ms intensity must be >=90/100; got %d", progress_2))
+  end)
+
+  it("500ms budget: full transition complete within 5 ticks at 10Hz", function()
+    local clock = FakeClock.new(0.0)
+    local sm = StateMachine.new_with_clock(clock)
+    sm:receive({mood=2, intensity=100, confidence=85, seq=1})  -- STRESSED
+    sm:receive({mood=1, intensity=20, confidence=82, seq=2})   -- CALM target
+
+    for _ = 1, 5 do
+      clock:advance(0.1)
+      sm:tick()
+    end
+    -- After 500ms, interpolation must be complete (at or very near target)
+    assert.is_true(sm:current_intensity() <= 25,
+      string.format("after 500ms should be near CALM intensity=20; got %d",
+        sm:current_intensity()))
+    assert.equals("calm", sm:current_mood())
+  end)
+
+  it("rapid update mid-interpolation blends, does not snap", function()
+    -- Two STRESSED updates 50ms apart, then CALM at 100ms.
+    -- At 200ms, creature must not show a hard snap to CALM.
+    local clock = FakeClock.new(0.0)
+    local sm = StateMachine.new_with_clock(clock)
+    sm:receive({mood=2, intensity=85, confidence=85, seq=1})   -- STRESSED t=0
+    clock:advance(0.05)
+    sm:tick()
+    sm:receive({mood=2, intensity=85, confidence=85, seq=2})   -- STRESSED t=50ms
+    clock:advance(0.05)
+    sm:tick()
+    local before_calm_intensity = sm:current_intensity()
+    sm:receive({mood=1, intensity=20, confidence=82, seq=3})   -- CALM t=100ms
+    clock:advance(0.1)
+    sm:tick()
+    local after_calm_intensity = sm:current_intensity()
+    -- Must blend, not snap: intensity may not drop by more than 50% in one tick
+    local delta = before_calm_intensity - after_calm_intensity
+    assert.is_true(delta < before_calm_intensity * 0.5,
+      string.format("snap detected: intensity dropped %d in one tick (from %d to %d)",
+        delta, before_calm_intensity, after_calm_intensity))
+  end)
+
+end)
 ```
 
 ### 6.6 Sequence Number Ordering / Dedup
@@ -970,6 +1093,37 @@ confidence, seq (uint16 LE). It carries **no raw sensor readings**.
 Protocol unit test for this lives in `§4.1` (`test_familiar_update_carries_no_raw_biometric_values`).
 The manual RAVEN-T2-1 visual audit confirms the abstraction at the display layer.
 
+### 6.10 No-Network Assertion (M3)
+
+**Invariant:** `FamiliarApp` and the entire host-side pipeline must never open
+a network connection. No cloud calls, no telemetry, no `requests`/`urllib`/
+`httpx` imports anywhere in `projects/synesthetic-familiar/host/`.
+
+**Phase-1 approach — trust-by-review + lightweight import-graph check:**
+
+```python
+# tests/unit/test_no_network.py
+import importlib
+import sys
+
+def test_familiar_app_import_graph_excludes_network_packages():
+    """M3 / Privacy: FamiliarApp must not import any network library.
+    No cloud calls, no telemetry. Local heuristic only (ARD §5.3 Decision 2)."""
+    network_packages = {"requests", "urllib3", "httpx", "aiohttp", "boto3",
+                        "google.cloud", "openai", "anthropic"}
+    # Import the host package in a clean slate; check what landed in sys.modules
+    import host.main  # noqa: F401
+    loaded = set(sys.modules.keys())
+    leaks = network_packages & {pkg.split(".")[0] for pkg in loaded}
+    assert not leaks, (
+        f"Network packages imported by host pipeline (must not exist): {leaks}"
+    )
+```
+
+If the import-graph check is too brittle for the current project layout, note
+it explicitly as **Phase-1 trust-by-review**: `requirements.txt` contains no
+cloud-SDK packages (enforced by Raven's Week-1 self-verification checklist).
+
 ---
 
 ## 7. Lua / On-Device Testing
@@ -1029,54 +1183,139 @@ describe("state machine", function()
     -- After reset, device queues FAMILIAR_RESET notification (opcode 0x01)
     assert.equals(0x01, sm:pending_notification_opcode())
   end)
+
+  -- I1: ATTENTION overlay — on_imu_peak() triggers ATTENTION for <=500ms,
+  -- then restores the previous mood (NOT resets to neutral).
+  it("on_imu_peak overlays ATTENTION then restores previous mood", function()
+    local clock = FakeClock.new(0.0)
+    local sm = StateMachine.new_with_clock(clock)
+    sm:receive({mood=2, intensity=85, confidence=82, seq=1})
+    assert.equals("stressed", sm:current_mood())
+
+    sm:on_imu_peak()                    -- trigger ATTENTION overlay
+    assert.equals("attention", sm:current_mood())
+
+    clock:advance(0.3)                  -- 300ms — still within overlay window
+    sm:tick()
+    assert.equals("attention", sm:current_mood())
+
+    clock:advance(0.21)                 -- cross 500ms total (0.3 + 0.21 = 0.51s)
+    sm:tick()
+    assert.equals("stressed", sm:current_mood(),  -- restored to STRESSED, not neutral
+      "ATTENTION overlay must restore to previous mood, not reset to neutral")
+  end)
+
+  it("on_imu_peak overlay restores within 500ms (upper bound)", function()
+    local clock = FakeClock.new(0.0)
+    local sm = StateMachine.new_with_clock(clock)
+    sm:receive({mood=1, intensity=40, confidence=80, seq=1})   -- CALM
+    sm:on_imu_peak()
+    assert.equals("attention", sm:current_mood())
+    clock:advance(0.5)
+    sm:tick()
+    assert.equals("calm", sm:current_mood(),
+      "ATTENTION overlay must restore within 500ms")
+  end)
+
+  -- I3: CALM 60s sustain — creature must stay NEUTRAL for a full 60s of calm
+  -- signal before transitioning to CALM. ~590 packets (59s) still NEUTRAL;
+  -- 600 packets (60s) triggers CALM.
+  it("requires 60s sustained calm signal before transitioning to CALM", function()
+    local clock = FakeClock.new(0.0)
+    local sm = StateMachine.new_with_clock(clock)
+    -- Feed 590 calm-signal packets at 10Hz (1 per 100ms) — 59s total
+    for i = 1, 590 do
+      sm:receive({mood=1, intensity=30, confidence=82, seq=i})
+      clock:advance(0.1)
+      sm:tick()
+    end
+    assert.equals("neutral", sm:current_mood(),
+      "590 calm packets (59s) must still be NEUTRAL — 60s threshold not reached")
+
+    -- 10 more packets = 60s total — now transition should fire
+    for i = 591, 600 do
+      sm:receive({mood=1, intensity=30, confidence=82, seq=i})
+      clock:advance(0.1)
+      sm:tick()
+    end
+    assert.equals("calm", sm:current_mood(),
+      "600 calm packets (60s) must transition to CALM")
+  end)
 end)
 ```
 
-### 7.3 Lua Testing Authority and Oracle Limitations
+### 7.3 Lua Testing Authority — `busted` is the Sole Ground Truth
 
 **`busted` runs real Lua** — it is the ground truth for `state_machine.lua`
-behavior. The Python simulation in `LuaStateMachineSim` (§7.3a) is a
-**behavioral oracle only** — it compares Python-to-Python, NOT Python-to-production-Lua.
-That is not the same thing.
+behavior. No Python simulation or cross-validation path substitutes for it.
+A pure-Python reimplementation that agrees with itself proves the Python model
+is self-consistent — it says nothing about whether the Lua production code matches.
 
-**Correct approach for cross-validation:**
-1. Write `busted` tests for the canonical behavior.
-2. If you want property-based fuzz coverage, drive it via the real Lua
-   interpreter (e.g., `lupa` Python binding to LuaJIT, or `subprocess` invoking
-   `lua state_machine_fuzz.lua <test_case>`) so you are actually exercising the
-   production code.
-3. A pure-Python simulation that agrees with itself proves the Python model is
-   consistent — it says nothing about whether the Lua production code matches.
+**The `lupa` Python→Lua cross-validation path is deferred / out of scope for
+Phase-1.** It adds a LuaJIT runtime dependency that is not confirmed available
+in CI, and the parametrize fixture table below already covers the boundary
+cases that motivated the property-test approach. Revisit in Phase-2 if
+property-based fuzz of the Lua state machine becomes necessary.
+
+**Property-test replacement — `@pytest.mark.parametrize` fixture table (~8 rows):**
+
+The `hypothesis` strategy is replaced with an explicit fixture table covering
+each threshold boundary and one nominal case per mood state. This is
+classicist: pure inputs → expected output, no generators.
 
 ```python
-# tests/unit/test_lua_state_machine_via_interpreter.py
-# CORRECT: exercises real Lua via interpreter binding
+# tests/unit/test_inference_parametrize.py
 
-import lupa  # or subprocess invoking lua5.3
+import pytest
+from host.inference import compute_mood
 
-@given(mood_sequences())
-def test_real_lua_state_machine_matches_spec(mood_sequence):
-    """Property test driving the REAL Lua state_machine.lua, not a Python clone."""
-    lua = lupa.LuaRuntime()
-    lua.execute(open("device/state_machine.lua").read())
-    sm = lua.globals().StateMachine.new()
-    for update in mood_sequence:
-        sm.receive(update)
-    # Assert against expected outcome per our spec
-    expected = compute_expected_outcome(mood_sequence)
-    assert sm.current_mood() == expected
+@pytest.mark.parametrize("audio_rms,audio_pv,imu_accel,imu_rot,expected_mood,min_conf", [
+    # Nominal STRESSED — all signals high
+    (0.85, 0.90, 0.75, 0.60, "stressed",  0.80),
+    # Threshold boundary STRESSED — just above stress floor
+    (0.65, 0.66, 0.61, 0.55, "stressed",  0.70),
+    # Nominal CALM — all signals low
+    (0.10, 0.08, 0.08, 0.04, "calm",      0.80),
+    # Threshold boundary CALM — just below calm ceiling
+    (0.25, 0.22, 0.20, 0.15, "calm",      0.70),
+    # Nominal NEUTRAL — mid-band ambiguous
+    (0.38, 0.35, 0.36, 0.32, "neutral",   0.00),   # confidence < 0.7 expected
+    # Low-confidence mid-band — must not exceed gate
+    (0.40, 0.40, 0.40, 0.40, "neutral",   0.00),   # sub-threshold, gate fires
+    # IMU-dominant stress (mic low, IMU high)
+    (0.20, 0.15, 0.80, 0.70, "stressed",  0.60),   # reduced confidence (IMU-only path)
+    # Mic-dominant calm (IMU low, mic low)
+    (0.12, 0.10, 0.05, 0.03, "calm",      0.75),
+], ids=[
+    "stressed-nominal", "stressed-boundary",
+    "calm-nominal", "calm-boundary",
+    "neutral-nominal", "neutral-low-conf",
+    "imu-dominant-stressed", "mic-dominant-calm",
+])
+def test_compute_mood_boundary_table(audio_rms, audio_pv, imu_accel, imu_rot,
+                                      expected_mood, min_conf):
+    result = compute_mood(
+        audio_rms=audio_rms, audio_pitch_variance=audio_pv,
+        imu_acceleration=imu_accel, imu_rotation=imu_rot,
+    )
+    assert result["mood"] == expected_mood, (
+        f"Expected mood={expected_mood!r}, got {result['mood']!r} "
+        f"(inputs: rms={audio_rms}, pv={audio_pv}, accel={imu_accel}, rot={imu_rot})"
+    )
+    if min_conf > 0:
+        assert result["confidence"] >= min_conf, (
+            f"Expected confidence>={min_conf}, got {result['confidence']}"
+        )
 ```
 
-**If `lupa`/interpreter binding is unavailable:** Run busted with a generated
-test fixture file, parse the result. Do NOT substitute a Python clone.
+### 7.3a (Deferred) Python Simulation — Out of Scope Phase-1
 
-### 7.3a (Legacy note) Python Simulation — Bounded Usefulness
-
-A Python `LuaStateMachineSim` can still be used as a **spec document** — a
-human-readable statement of expected behavior. But it must be compared against
-busted or interpreter-driven results to have correctness value. Any test that
-only compares `LuaStateMachineSim` to a `python_reference` is validating an
-oracle against itself and provides zero coverage of production Lua.
+A Python `LuaStateMachineSim` was previously discussed as a behavioral oracle.
+This path is **deferred**: a Python-only simulation that agrees with itself
+validates the Python model's internal consistency — not the production Lua.
+If Phase-2 introduces fuzz testing of `state_machine.lua`, drive it through
+a real Lua interpreter (`busted` with generated fixture files or `subprocess`
+invoking `lua state_machine_fuzz.lua`) — never via a Python clone.
 
 ### 7.4 Emulator Integration Tests (halo-emulator)
 
@@ -1119,6 +1358,58 @@ def test_stressed_sprite_has_warm_color_pixels():
 | Week 3 — "It's alive" | 1-hour wear session + gesture test | No OOM or BLE freeze; double-tap locally snaps NEUTRAL on device; host sees FAMILIAR_RESET notification; creature feels "alive not robotic" |
 | Week 3 — Privacy audit | Non-wearer observes creature for 5 min | Cannot infer stress/calm state from visual alone; no labeled text visible |
 
+#### M5 — Week-1 Programmatic Acceptance Gate
+
+Before merging the Week-1 "It moves" sprint, the following **automated gate**
+must be green in addition to the manual check above. It uses the emulator
+(busted or pytest integration tier) and confirms the render loop + BLE protocol
+work end-to-end without hardware.
+
+```python
+# tests/integration/test_week1_acceptance_gate.py
+# M5 — Week-1 gate: emulator renders bobbing sprite from mock FAMILIAR_UPDATE packets.
+# Must pass before Week-1 branch merges (in addition to manual device check).
+
+@pytest.mark.integration
+def test_week1_emulator_sprite_bobs_from_mock_packets():
+    """
+    M5 Week-1 gate: drive N mock FAMILIAR_UPDATE packets into the emulator.
+    Assert: (1) lit pixels visible (sprite rendered), (2) pixel centroid is in
+    the 7-o'clock region, (3) BLE receive log shows no errors or malformed packets.
+    """
+    emulator = HaloEmulator()
+    emulator.load_lua("device/main.lua")
+    ble_errors = []
+    emulator.on_ble_error(lambda e: ble_errors.append(e))
+
+    # Send 10 NEUTRAL packets (1 second at 10Hz) — enough for at least one bob cycle
+    for seq in range(1, 11):
+        emulator.send_message(encode_familiar_update(Mood.NEUTRAL, 50, 80, seq=seq))
+        emulator.tick(frames=3)           # ~3 render frames per packet at 30fps
+
+    fb = emulator.get_framebuffer()
+    assert lit_pixel_percentage(fb) > 0.5,   "Sprite must be visible (>0.5% lit pixels)"
+    assert sprite_center_in_region(fb, region="7_oclock_rim"), \
+        "Sprite center must be in 7-o'clock rim region"
+    assert ble_errors == [], f"BLE log must be clean; got errors: {ble_errors}"
+```
+
+```lua
+-- tests/lua/test_week1_gate.lua (busted alternative — runs without Python emulator)
+-- M5 Week-1 gate: state machine processes NEUTRAL packets without error.
+describe("Week-1 acceptance gate", function()
+  it("processes 10 mock FAMILIAR_UPDATE packets cleanly", function()
+    local sm = StateMachine.new()
+    for seq = 1, 10 do
+      sm:receive({mood=0, intensity=50, confidence=80, seq=seq})
+      sm:tick()
+    end
+    assert.equals("neutral", sm:current_mood())
+    assert.is_nil(sm:last_error(), "State machine must process packets without error")
+  end)
+end)
+```
+
 ### 7.6 What Can ONLY Be Verified on Real Hardware
 
 The following behaviors cannot be validated by emulator, busted, or host-side
@@ -1144,7 +1435,6 @@ tests. They are hardware-only, manual-only, and must be executed per milestone:
 |------|---------|
 | `pytest` | Test runner for all Python tiers |
 | `pytest-mock` / `unittest.mock` | Mock collaborators in unit tests |
-| `hypothesis` | Property-based fuzz testing for inference.py and state machine |
 | `pytest-cov` | Coverage measurement |
 | `pytest -m "unit"` | Fast unit suite (< 5s) |
 | `pytest -m "acceptance"` | Acceptance suite (< 30s) |
@@ -1166,7 +1456,7 @@ markers = [
 - `familiar_protocol.py`: 100% line coverage (wire format is safety-critical)
 - `sensors.py`: 85% line coverage (hardware paths are integration-tested)
 - `main.py`: 80% line coverage (orchestration; harder to cover all reconnect paths)
-- Overall: 90%+ for unit + acceptance combined
+- No global coverage gate in CI — selective 95% enforced on `familiar_protocol.py` only (see CI pipeline below)
 
 ### Lua / On-Device
 
@@ -1189,7 +1479,8 @@ jobs:
 
   slow:                     # PR merge gate, ~3min
     - pytest -m "integration"   # requires halo-emulator
-    - pytest --cov --cov-fail-under=90
+    - pytest --cov --cov-report=term-missing
+    - pytest --cov-fail-under=95 host/familiar_protocol.py  # selective gate: wire format only
 
   device:                   # Manual trigger only
     # pytest -m "device"    # NOT in automated CI
