@@ -310,7 +310,7 @@ The device sends `FAMILIAR_ACK` automatically after every **10 accepted `FAMILIA
 
 **Structure:**
 ```
-synesthetic-familiar/
+projects/synesthetic-familiar/
 ├── host/
 │   ├── main.py              # Entry point, BLE connection
 │   ├── sensors.py           # Mic capture, IMU relay (mic + IMU only)
@@ -442,7 +442,7 @@ def compute_mood(audio_rms, audio_pitch_variance, imu_acceleration, imu_rotation
 
 2. **Anti-robotic jitter:** Visual animation includes 5-10% random jitter as visual polish to avoid mechanical, obviously-algorithmic motion — this is **not** a privacy protection mechanism. An informed observer who knows the creature is mood-linked can infer approximate mood state from behavior. Real privacy protection comes from: (a) **obscurity** — the creature is not obviously mood-linked to casual bystanders; and (b) **abstraction** — no text, numbers, or explicit emotion labels are ever displayed.
 
-3. **On-device inference:** Mood calculation runs on host app; raw audio/IMU never leaves the host at all — only the derived mood/intensity/confidence/seq is transmitted over BLE to the device. No cloud telemetry of embodied signals. Camera explicitly deferred to Phase 2.
+3. **Host-side inference:** Mood calculation runs on host app; raw audio/IMU never leaves the host at all — only the derived mood/intensity/confidence/seq is transmitted over BLE to the device. No cloud telemetry of embodied signals. Camera explicitly deferred to Phase 2.
 
 4. **Desktop mic indicator:** v1 captures mic on the host desktop machine — recording indicator is OS-managed (e.g. macOS/Windows mic-in-use indicator in system tray). No additional in-app indicator is required for v1.
 

@@ -920,7 +920,7 @@ end)
 
 ### 6.6 Sequence Number Ordering / Dedup
 
-**Spec (resolved — see `ng-vesper-wire-format.md`):**
+**Spec (resolved — see ARD §5.2 and `.squad/decisions/decisions.md` "2026-06-08: VESPER BLE Wire-Format Specification"):**
 - uint16, wraps 0xFFFF → 0x0000.
 - Dedup rule: `delta = (received_seq - last_accepted_seq) mod 65536`, interpret
   as **signed 16-bit**.
@@ -1114,7 +1114,10 @@ def test_familiar_app_import_graph_excludes_network_packages():
     # Import the host package in a clean slate; check what landed in sys.modules
     import host.main  # noqa: F401
     loaded = set(sys.modules.keys())
-    leaks = network_packages & {pkg.split(".")[0] for pkg in loaded}
+    # Full dotted-prefix match: "google.cloud" catches "google.cloud.storage"
+    # without over-matching unrelated "google.*" packages.
+    leaks = {pkg for pkg in network_packages
+             if any(m == pkg or m.startswith(pkg + ".") for m in loaded)}
     assert not leaks, (
         f"Network packages imported by host pipeline (must not exist): {leaks}"
     )
@@ -1565,7 +1568,8 @@ validation exceptions where the acceptance criterion is inherently human.
 ### RESOLVED — No Longer Blockers
 
 The following items were open in Rev 1 and are now settled by the ARD amendment
-(`hiro-vesper-arch-clarifications.md`, `ng-vesper-wire-format.md`):
+(ARD §§3–5 / §5.2) and the decisions recorded in `.squad/decisions/decisions.md`
+("2026-06-06: Aaron Approved Architecture" and "2026-06-08: VESPER BLE Wire-Format Specification"):
 
 | # | Item | Resolution |
 |---|------|------------|
