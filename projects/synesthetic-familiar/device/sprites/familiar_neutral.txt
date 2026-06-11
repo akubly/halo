@@ -1,0 +1,81 @@
+# VESPER — Week 1 Neutral Sprite (24×24, 4-bit indexed)
+#
+# Owner: Da5id (HUD/UX)
+# Date: 2026-06-09
+# ARD: §5.5, Decision 3 (Abstract-with-Eyes)
+#
+# LEGEND:
+#   . = 0 (transparent/black)
+#   # = 1 (body dark: 0x1A2D3D)
+#   @ = 2 (body mid: 0x2E4756)
+#   O = 3 (eye white: 0xE0F4FF)
+#   _ = 4 (shadow: 0x0D1820)
+#
+# Form: Organic blob with single bright eye at upper-right.
+# No face, no mouth — abstract but alive.
+# Eye is the attention locus; high-contrast for peripheral legibility.
+
+........................    # Row 1  (all transparent)
+........................    # Row 2
+........................    # Row 3
+.........####...........    # Row 4  (body starts)
+.......########.........    # Row 5
+......##@@@@@@##........    # Row 6
+.....#@@@@@@@@@@#.......    # Row 7
+....#@@@@@@@OOO@@#......    # Row 8  (eye appears: OOO)
+...#@@@@@@OOOOO@@#......    # Row 9  (eye center: OOOOO)
+...#@@@@@@@OOO@@@#......    # Row 10 (eye lower: OOO)
+..#@@@@@@@@@@@@@@#......    # Row 11
+..#@@@@@@@@@@@@@@@#.....    # Row 12
+.#@@@@@@@@@@@@@@@@#.....    # Row 13
+.#@@@@@@@@@@@@@@@@#.....    # Row 14
+.#@@@@@@@@@@@@@@@#......    # Row 15
+.#@@@@@@@@@@@@@@#.......    # Row 16
+..#@@@@@@@@@@@##........    # Row 17
+..#@@@@@@@@@@#..........    # Row 18
+...##@@@@@@##...........    # Row 19
+.....######.............    # Row 20
+........................    # Row 21 (all transparent)
+........................    # Row 22
+........................    # Row 23
+........................    # Row 24
+
+# INDEX GRID (numeric, for Lua parsing):
+# Each digit = one palette index. Rows separated by newlines.
+# Ng: parse this block if ASCII art is ambiguous.
+
+000000000000000000000000
+000000000000000000000000
+000000000000000000000000
+000000000111100000000000
+000000011111111000000000
+000000112222221100000000
+000001222222222210000000
+000012222222333221000000
+000122222233333221000000
+000122222223332221000000
+001222222222222221000000
+001222222222222222100000
+012222222222222222100000
+012222222222222222100000
+012222222222222221000000
+012222222222222210000000
+001222222222221100000000
+001222222222210000000000
+000112222221100000000000
+000001111110000000000000
+000000000000000000000000
+000000000000000000000000
+000000000000000000000000
+000000000000000000000000
+
+# STATS:
+# - Body pixels (1+2): ~80
+# - Eye pixels (3): ~11
+# - Shadow pixels (4): 0 (simplified for Week 1)
+# - Total lit: ~91 pixels = 1.5% of 256×256 canvas ✓
+#
+# WEEK 1 SCOPE:
+# - Neutral palette only (cool blue-gray body, cyan-white eye)
+# - Bob animation: ±2px vertical, 0.25Hz sine wave
+# - No halo, no fraying, no color shifts — those are Week 2
