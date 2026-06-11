@@ -175,27 +175,34 @@ end
 
 -- ─── BLE receive callback ─────────────────────────────────────────────────────
 local function on_ble_data(data)
-  if not data or #data == 0 then return end
-  local op = data:byte(1)
-  if op ~= 0x80 then return end   -- only FAMILIAR_UPDATE handled device-side
+  -- pcall guard: a transient decode/send error must not freeze the callback.
+  local ok, err = pcall(function()
+    if not data or #data == 0 then return end
+    local op = data:byte(1)
+    if op ~= 0x80 then return end   -- only FAMILIAR_UPDATE handled device-side
 
-  local msg = decode_update(data)
-  if not msg then return end
-  if not is_newer_seq(msg.seq, state.last_seq) then return end
+    local msg = decode_update(data)
+    if not msg then return end
+    if not is_newer_seq(msg.seq, state.last_seq) then return end
 
-  -- Accept the packet
-  state.last_seq   = msg.seq
-  state.last_rx_t  = frame.time.utc()
-  state.accepted   = state.accepted + 1
-  state.mood       = msg.mood
-  state.intensity  = msg.intensity
-  state.confidence = msg.confidence
+    -- Accept the packet
+    state.last_seq   = msg.seq
+    state.last_rx_t  = frame.time.utc()
+    state.accepted   = state.accepted + 1
+    state.mood       = msg.mood
+    state.intensity  = msg.intensity
+    state.confidence = msg.confidence
 
-  -- ACK every 10 accepted packets (ARD §5.2)
-  if state.accepted % ACK_INTERVAL == 0 then
-    -- FAMILIAR_ACK: opcode 0x02 + last_received_seq (uint16 LE)
-    local ack = string.char(0x02) .. string.pack("<I2", state.last_seq)
-    frame.bluetooth.send(ack)
+    -- ACK every 10 accepted packets (ARD §5.2)
+    if state.accepted % ACK_INTERVAL == 0 then
+      -- FAMILIAR_ACK: opcode 0x02 + last_received_seq (uint16 LE)
+      local ack = string.char(0x02) .. string.pack("<I2", state.last_seq)
+      frame.bluetooth.send(ack)
+    end
+  end)
+  if not ok then
+    -- Minimal visibility: print keeps the error surfaced without crashing.
+    print("on_ble_data error: " .. tostring(err))
   end
 end
 
@@ -220,8 +227,10 @@ local function draw_creature(cx, cy, mood_idx)
   if SPRITE_BITMAP_READY and SPRITE_BITMAP then
     -- Fast path: single bitmap() call (SDK gap #2 — confirm format first).
     -- frame.display.bitmap(ox, oy, SPRITE_W, SPRITE_BITMAP)
-    -- Uncomment the line above and remove the set_pixel loop below
-    -- once frame.display.bitmap() format is confirmed with Da5id.
+    -- Uncomment the line above once frame.display.bitmap() format is confirmed
+    -- with Da5id.  The return below ensures the pixel loop is skipped so
+    -- enabling this path does not double-render (bitmap + set_pixel).
+    return
   end
 
   -- Pixel loop (always correct; slower than bitmap()).
@@ -264,38 +273,52 @@ end
 local t_prev = frame.time.utc()
 
 while true do
-  local t_now = frame.time.utc()
-  local dt     = t_now - t_prev
-  t_prev       = t_now
+  local ok, err = pcall(function()
+    local t_now = frame.time.utc()
+    local dt     = t_now - t_prev
+    t_prev       = t_now
 
-  -- Timeout: no BLE update for 10s → snap to neutral (ARD §5.1)
-  if state.last_rx_t > 0 and (t_now - state.last_rx_t) > TIMEOUT_S then
-    state.mood      = 0
-    state.intensity = 50
-  end
+    -- Clamp dt: prevents bob_phase teleport on wall-clock jumps (e.g. NTP).
+    dt = math.min(dt, 2 * RENDER_DT)
 
-  -- Advance bob phase
-  local hz = BOB_HZ[state.mood] or 0.25
-  state.bob_phase = state.bob_phase + 2 * math.pi * hz * dt
-  local bob_y = math.floor(BOB_AMP_PX * math.sin(state.bob_phase) + 0.5)
+    -- Timeout: no BLE update for 10s → snap to neutral (ARD §5.1).
+    -- Also reset last_seq so a restarted host (seq 0x0000) is accepted
+    -- (reconnect rule: delta = 0x0000 - 0xFFFF = 1 → accept).
+    if state.last_rx_t > 0 and (t_now - state.last_rx_t) > TIMEOUT_S then
+      state.mood      = 0
+      state.intensity = 50
+      state.last_seq  = 0xFFFF   -- reconnect rule: next host seq=0 → delta=1 → accept
+      state.last_rx_t = 0        -- re-arm: don't fire again until next real packet
+    end
 
-  -- Smooth intensity toward target (200ms lerp, ARD §5.1)
-  local lerp_t = clamp(dt / 0.2, 0.0, 1.0)
-  state.render_int = state.render_int + (state.intensity - state.render_int) * lerp_t
+    -- Advance bob phase; clamp to [0, 2π) to prevent float growth.
+    local hz = BOB_HZ[state.mood] or 0.25
+    state.bob_phase = (state.bob_phase + 2 * math.pi * hz * dt) % (2 * math.pi)
+    local bob_y = math.floor(BOB_AMP_PX * math.sin(state.bob_phase) + 0.5)
 
-  -- Clear frame (OLED: fill with black = zero power)
-  frame.display.clear()
+    -- Smooth intensity toward target (200ms lerp, ARD §5.1)
+    local lerp_t = clamp(dt / 0.2, 0.0, 1.0)
+    state.render_int = state.render_int + (state.intensity - state.render_int) * lerp_t
 
-  -- Draw creature at bobbed position
-  draw_creature(SPRITE_CX, SPRITE_CY + bob_y, state.mood)
+    -- Clear frame (OLED: fill with black = zero power)
+    frame.display.clear()
 
-  -- Flush display buffer to screen
-  frame.display.show()
+    -- Draw creature at bobbed position
+    draw_creature(SPRITE_CX, SPRITE_CY + bob_y, state.mood)
 
-  -- Sleep for remainder of frame budget
-  local elapsed = frame.time.utc() - t_now
-  local sleep_t = RENDER_DT - elapsed
-  if sleep_t > 0 then
-    _sleep(sleep_t)
+    -- Flush display buffer to screen
+    frame.display.show()
+
+    -- Sleep for remainder of frame budget
+    local elapsed = frame.time.utc() - t_now
+    local sleep_t = RENDER_DT - elapsed
+    if sleep_t > 0 then
+      _sleep(sleep_t)
+    end
+  end)
+  if not ok then
+    -- Brief backoff before retrying; keeps the creature alive after transient errors.
+    print("render loop error: " .. tostring(err))
+    _sleep(RENDER_DT)
   end
 end

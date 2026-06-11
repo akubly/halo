@@ -18,7 +18,10 @@ from __future__ import annotations
 import dataclasses
 from typing import Literal
 
-# Tunable thresholds (population defaults; baseline learning replaces after day 3)
+# Tunable thresholds — ARD §5.4 population defaults.
+# These are starting values derived from aggregate user studies; baseline
+# learning (personal mean + 1.5σ after day 3) replaces them per-user.
+# Do not hard-code call sites to these values; always import the constants.
 STRESS_THRESHOLD: float = 0.65
 CALM_THRESHOLD: float = 0.35
 CONFIDENCE_GATE: float = 0.7

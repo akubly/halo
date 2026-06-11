@@ -219,16 +219,23 @@ def dispatch_device_message(data: bytes) -> Union[FamiliarAck, FamiliarReset, No
     """
     Dispatch an incoming Device→Host message by opcode.
 
-    Returns the decoded dataclass, or None if the opcode is unrecognised.
-    Does not raise on unknown opcodes — log and drop is caller's responsibility.
+    Returns the decoded dataclass, or None if the opcode is unrecognised or
+    the packet is malformed.  Never raises — malformed packets are logged and
+    dropped (log-and-drop is caller's responsibility via the returned None).
     """
     if not data:
         return None
     opcode = data[0]
     if opcode == OPCODE_FAMILIAR_ACK:
-        _, last_seq = decode_familiar_ack(data)
+        try:
+            _, last_seq = decode_familiar_ack(data)
+        except ValueError:
+            return None
         return FamiliarAck(last_received_seq=last_seq)
     if opcode == OPCODE_FAMILIAR_RESET:
-        decode_familiar_reset(data)  # validates; raises on bad input
+        try:
+            decode_familiar_reset(data)  # validates length/opcode
+        except ValueError:
+            return None
         return FamiliarReset()
     return None

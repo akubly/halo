@@ -96,6 +96,16 @@ class BrilliantBleTransport:
     async def connect(self) -> None:
         try:
             import frame_sdk  # type: ignore[import]  # SDK gap: confirm module name
+            # TODO(ARD §10): --device ADDR binding is UNVERIFIED against the live Halo
+            # SDK.  frame_sdk.Frame() may not accept an address argument, or the
+            # connection API may differ entirely.  Validate on real hardware before
+            # relying on targeted device selection via --device.
+            if self._address:
+                logger.warning(
+                    "[BrilliantBLE] --device ADDR binding is UNVERIFIED (ARD §10 SDK gap). "
+                    "frame_sdk.Frame() may not support address targeting; connecting "
+                    "without address filter.  Validate on real hardware."
+                )
             self._frame = frame_sdk.Frame()
             await self._frame.connect()  # type: ignore[union-attr]
             await self._frame.bluetooth.set_data_response_handler(self._on_data)  # type: ignore[union-attr]
@@ -106,6 +116,12 @@ class BrilliantBleTransport:
                 "Run with --mock, or install requirements.txt and confirm SDK module "
                 "name against current Halo firmware.  (ARD §10 SDK gap)"
             ) from exc
+        except (AttributeError, TypeError) as exc:
+            raise RuntimeError(
+                "SDK API mismatch (ARD §10): frame_sdk API differs from expected shape.  "
+                "Confirm connect/send/receive method names against current Halo firmware.  "
+                "Run with --mock to bypass hardware."
+            ) from exc
 
     async def disconnect(self) -> None:
         if self._frame is not None:
@@ -113,8 +129,12 @@ class BrilliantBleTransport:
             logger.info("[BrilliantBLE] disconnected")
 
     async def send(self, data: bytes) -> None:
-        if self._frame is not None:
-            await self._frame.bluetooth.send_data(data)  # type: ignore[union-attr]
+        if self._frame is None:
+            logger.warning(
+                "[BrilliantBLE] send() called before connect() — dropping %d bytes", len(data)
+            )
+            return
+        await self._frame.bluetooth.send_data(data)  # type: ignore[union-attr]
 
     def on_receive(self, callback: Callable[[bytes], None]) -> None:
         self._recv_cb = callback
@@ -164,8 +184,7 @@ _MOOD_NAME = {0: "NEUTRAL", 1: "CALM", 2: "STRESSED", 3: "ATTENTION"}
 
 async def run(transport: Transport) -> None:
     """Connect to transport and loop forever sending mock FAMILIAR_UPDATE at 10Hz."""
-    seq = SequenceCounter()
-    seq.reset()   # starts at 0xFFFF so first next() → 0x0000
+    seq = SequenceCounter()  # starts at 0xFFFF so first next() → 0x0000
 
     def on_device_msg(data: bytes) -> None:
         msg = dispatch_device_message(data)

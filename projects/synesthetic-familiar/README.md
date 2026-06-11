@@ -74,7 +74,10 @@ python main.py --device <HALO_BLE_ADDRESS>
 - **Confidence gating:** host is the single authority. If confidence < 0.7,
   no update sent (silence > hallucination).
 - **Privacy:** raw audio/IMU never leave host. Wire format carries only
-  `mood_enum + intensity` — no PII.
+  `mood_enum + intensity + confidence` — no PII.  The confidence byte
+  is transmitted as a 0–100 integer so the device can surface signal
+  quality (e.g. dim the creature when confidence is low).  No raw
+  biometric values are included.
 
 See ARD §4–§5.5 for full architecture, wire format, and render spec.
 
