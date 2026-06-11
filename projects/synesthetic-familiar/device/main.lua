@@ -279,7 +279,8 @@ while true do
     t_prev       = t_now
 
     -- Clamp dt: prevents bob_phase teleport on wall-clock jumps (e.g. NTP).
-    dt = math.min(dt, 2 * RENDER_DT)
+    -- Lower bound 0 prevents a backward clock step from running bob_phase in reverse.
+    dt = math.max(0, math.min(dt, 2 * RENDER_DT))
 
     -- Timeout: no BLE update for 10s → snap to neutral (ARD §5.1).
     -- Also reset last_seq so a restarted host (seq 0x0000) is accepted
@@ -318,7 +319,12 @@ while true do
   end)
   if not ok then
     -- Brief backoff before retrying; keeps the creature alive after transient errors.
-    print("render loop error: " .. tostring(err))
-    _sleep(RENDER_DT)
+    -- Both print() and _sleep() are guarded so a failure in the handler itself
+    -- cannot escape the loop.  (Dev fail-fast: replace pcall(print,...) with
+    -- error(err) here if you want hard crashes during firmware development.)
+    pcall(print, "render loop error: " .. tostring(err))
+    if type(_sleep) == "function" then
+      pcall(_sleep, RENDER_DT)
+    end
   end
 end

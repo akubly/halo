@@ -109,7 +109,7 @@ class BrilliantBleTransport:
             self._frame = frame_sdk.Frame()
             await self._frame.connect()  # type: ignore[union-attr]
             await self._frame.bluetooth.set_data_response_handler(self._on_data)  # type: ignore[union-attr]
-            logger.info("[BrilliantBLE] connected to %s", self._address)
+            logger.info("[BrilliantBLE] connected (address filter UNVERIFIED — ARD §10)")
         except ImportError as exc:
             raise RuntimeError(
                 "brilliant-ble / frame_sdk not installed or import path differs.  "
