@@ -475,3 +475,155 @@ Aaron approved all three of Hiro's ARD recommendations for the Synesthetic Famil
 **Why:** User decision on the three forks Hiro parked in ARD section 7. These are now LOCKED — the ARD moves from DRAFT to APPROVED. Build work can proceed against these constraints.
 
 ---
+
+## 2026-06-09
+
+### Decision: VESPER Week 1 Persona-Review Fix Wave
+**Author:** Ng  
+**Date:** 2026-06-09  
+**Branch:** week1-synesthetic-familiar  
+**Commit:** 52fbd39  
+**Status:** Implemented
+
+---
+
+## Summary
+
+Persona-review Code Panel (Correctness/Skeptic/Craft/Compliance/Security) produced 18 findings on the Week 1 "It moves" payload.  This decision documents the protocol/device behavior changes accepted in the fix wave.
+
+---
+
+## Behavior Changes
+
+### 1. Seq desync on idle timeout (device/main.lua)
+
+**Before:** 10s idle timeout only reset `state.mood = 0` and `state.intensity = 50`.  A restarted host with seq counter at 0x0000 would be rejected for ~33 minutes (device last_seq might be ~20000; delta = 0x0000 - 20000 > 32767 → dropped).
+
+**After:** Timeout block now also sets:
+- `state.last_seq = 0xFFFF` — reconnect rule: next host packet seq=0x0000 yields delta=1 → accepted.
+- `state.last_rx_t = 0` — re-arms the timeout; prevents repeated seq reset every frame while the host is actively sending after recovery.
+
+**Wire contract:** Unchanged.  Device behavior change only.  Aligned with ARD §5.2 reconnect rule (host resets counter to 0x0000; device must accept it).
+
+### 2. pcall guards (device/main.lua)
+
+**Before:** Render loop and BLE receive callback had no error protection.  Any transient `frame.*` error permanently froze the creature.
+
+**After:** Both `on_ble_data` body and render loop body are wrapped in `pcall(function() ... end)`.  On error: `print("context: " .. tostring(err))` + `_sleep(RENDER_DT)` backoff.  No behavioral change on the happy path.
+
+### 3. dispatch_device_message error handling (familiar_protocol.py)
+
+**Before:** Malformed Device→Host packets raised `ValueError` into the async BLE callback, crashing the receive handler.
+
+**After:** `decode_familiar_ack` and `decode_familiar_reset` calls are wrapped in `try/except ValueError → return None`.  Caller receives `None` for malformed packets; caller is responsible for log-and-drop (already implemented in `host/main.py` via the `msg is None` branch).
+
+### 4. draw_creature bitmap fast-path (device/main.lua)
+
+**Before:** `SPRITE_BITMAP_READY` block had no `return`; enabling the bitmap path later would double-render (bitmap + pixel loop).
+
+**After:** Added `return` at end of `SPRITE_BITMAP_READY` block.  No behavioral change today (bitmap path is still disabled); prevents the double-render regression when Da5id enables it in Week 2.
+
+---
+
+## Rejected Findings
+
+### Finding #10 — decode_familiar_ack return type
+
+**Finding:** `decode_familiar_ack` returns raw `(int, int)` tuple; inconsistent with `decode_familiar_update → FamiliarUpdate` dataclass pattern.
+
+**Decision: REJECTED for Week 1.**
+
+**Reasoning:** `test_protocol.py` (Juanita's locked test suite) asserts `opcode, seq = decode_familiar_ack(raw)` tuple unpacking across 7 tests (TestFamiliarAckDecode).  Changing the return type requires rewriting those tests — non-trivial churn with no behavioral improvement for Week 1 consumers, since `dispatch_device_message` already normalizes to `FamiliarAck` before returning to callers.  Defer to Week 2 with Juanita coordination.
+
+---
+
+## Escalation
+
+**Finding #18:** `device/main.lua` has not been validated on real Halo hardware.  The 20fps render loop, set_pixel sprite rendering, BLE receive callback, and `frame.time.utc()` time source must all be confirmed against live firmware.  **Action item for Aaron / hardware access.**
+
+---
+
+## Test Results
+
+| Before | After |
+|--------|-------|
+| 54 passed, 5 failed | 59 passed, 5 xfailed, 0 failed |
+
+New tests: 5 golden byte-vector fixtures in `tests/test_golden_vectors.py`.  
+Inference stubs: marked `@pytest.mark.xfail(reason="Week 2 — compute_mood() not yet implemented")`.
+
+---
+
+## Ng Week-1 Follow-ups (deferred to Week 2)
+
+_Logged 2026-06-10 after Cycle-2 polish wave.  Aaron approved all items below._
+
+---
+
+### [Week 2] Cross-language wire-format conformance
+
+**Owner:** Ng (+ Juanita for test infra)
+
+Promote `tests/test_golden_vectors.py` vectors into a language-neutral fixture
+(JSON or hex file) consumed by **both** the Python test suite **and** a
+Lua-side decode harness, so host↔device wire format is checked in lockstep.
+A protocol regression in either direction will then surface in CI rather than
+only during hardware validation.
+
+**Context:** Currently the golden vectors are Python-only (`test_golden_vectors.py`).
+The Lua `decode_update()` in `device/main.lua` implements the same ARD §5.2 spec
+but has no automated test at all — it is only validated by running on real hardware.
+This gap is acceptable for Week 1 (unauthenticated link, no security surface),
+but should be closed before the wire format is extended in Week 2+.
+
+---
+
+### [Week 2] Sequence-reset hardening after timeout
+
+**Owner:** Ng
+
+After the 10s idle timeout (`device/main.lua`), enter a reconnect state that
+accepts **only `seq == 0`** (or an explicit reset handshake) for the first
+packet, to narrow the post-timeout replay window.
+
+**Context:** Security review rated the current behavior acceptable for the
+unauthenticated Week-1 link and noted it self-heals. This is a hardening item,
+not a defect. ARD §5.1 reconnect rule already handles the common case; this
+tightens the window for replay of pre-timeout packets that arrive stale.
+
+---
+
+### [Week 2, also deferred from Cycle 1] Decoder-contract symmetry
+
+**Owner:** Ng + Juanita
+
+Make `decode_familiar_ack` return a `FamiliarAck` named type (and
+`decode_familiar_reset` return `FamiliarReset`) for decoder-contract symmetry
+with `decode_familiar_update`.
+
+Update the **7 tuple-contract tests** in `tests/test_protocol.py` in
+coordination with Juanita before landing — she owns the test suite contract.
+
+**Context:** `dispatch_device_message` already normalises to `FamiliarAck` for
+all callers, so this is a cleanup not a behaviour change.  Deferred from
+Cycle-1 to avoid uncoordinated test churn.
+
+---
+
+### [ACTION — Aaron] Hardware validation
+
+`device/main.lua` has **never run on real Halo hardware.**
+
+Week-1 "creature bobs, no jitter, no freeze" can only be signed off on-device.
+Please validate:
+
+- [ ] BLE connect (brilliant-ble / frame_sdk path)
+- [ ] FAMILIAR_UPDATE decode (opcode 0x80, 6-byte packet)
+- [ ] Sprite render at ~20fps (`set_pixel()` loop — measure frame time vs 50ms budget)
+- [ ] Bob animation (±2px sine, 0.25Hz neutral cycle)
+- [ ] 10s idle timeout → snap to neutral
+- [ ] Unsolicited ACK on connect visible on host side
+
+Once confirmed, close the hardware-validation action in the ARD §10 open-questions list.
+
+---
