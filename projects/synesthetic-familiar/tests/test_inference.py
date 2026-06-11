@@ -30,6 +30,16 @@ except ImportError as _e:
     STRESS_THRESHOLD = CALM_THRESHOLD = CONFIDENCE_GATE = None  # type: ignore[assignment]
 
 
+@pytest.fixture(autouse=True)
+def _require_inference_module() -> None:
+    """Fail every test with a human-readable message if the module is missing."""
+    if _IMPORT_ERROR is not None:
+        pytest.fail(
+            f"host.inference is not yet importable: {_IMPORT_ERROR}\n"
+            "These tests will pass once the inference module is implemented."
+        )
+
+
 class TestComputeMood(unittest.TestCase):
 
     @pytest.mark.xfail(reason="Week 2 — compute_mood() not yet implemented")

@@ -4,7 +4,7 @@ Entry point for the Synesthetic Familiar host app.
 Week 1 mock-send harness: cycles through mood states so the creature bobs
 on the Halo display.  No real sensors until Week 2.
 
-Transport injection (TransportPort seam):
+Transport injection (Transport Protocol seam):
   --mock (or no --device)  →  MockTransport: logs packets, no hardware needed
   --device ADDR            →  BrilliantBleTransport: wraps brilliant-ble
 

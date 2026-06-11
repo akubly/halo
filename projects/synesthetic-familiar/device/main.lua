@@ -226,11 +226,15 @@ local function draw_creature(cx, cy, mood_idx)
 
   if SPRITE_BITMAP_READY and SPRITE_BITMAP then
     -- Fast path: single bitmap() call (SDK gap #2 — confirm format first).
-    -- frame.display.bitmap(ox, oy, SPRITE_W, SPRITE_BITMAP)
-    -- Uncomment the line above once frame.display.bitmap() format is confirmed
-    -- with Da5id.  The return below ensures the pixel loop is skipped so
-    -- enabling this path does not double-render (bitmap + set_pixel).
-    return
+    -- Only returns early if the draw actually succeeds; falls through to the
+    -- pixel loop otherwise, so the familiar never blanks on a failed call.
+    local ok = pcall(function()
+      -- frame.display.bitmap(ox, oy, SPRITE_W, SPRITE_BITMAP)
+      -- Uncomment the line above once frame.display.bitmap() format is
+      -- confirmed with Da5id.  Until then ok=false → falls through below.
+    end)
+    if ok then return end
+    -- ok is false while the inner call is commented; pixel loop runs instead.
   end
 
   -- Pixel loop (always correct; slower than bitmap()).
