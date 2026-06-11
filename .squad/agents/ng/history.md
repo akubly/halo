@@ -43,6 +43,49 @@
 
 ---
 
+## Session Timeline (continued)
+
+| Date | Session | Key Output |
+|------|---------|-----------|
+| 2026-06-10 | Week 2 Sensors + Main Loop | `host/sensors.py` + `host/main.py` real loop shipped; 59 passed, 5 xfailed |
+
+---
+
+## Week-2 Implementation Notes
+
+### Key file paths
+- `projects/synesthetic-familiar/host/sensors.py` — SensorFrame, SensorStream, FakeSensorStream, SensorInitError
+- `projects/synesthetic-familiar/host/main.py` — quantise_intensity, apply_intensity_jitter, run(transport, sensor_stream), Transport/MockTransport/BrilliantBleTransport
+- `projects/synesthetic-familiar/host/inference.py` — owned by Librarian; main.py imports defensively
+- `.squad/decisions/inbox/ng-week2-sensors-mainloop.md` — full decision record
+
+### Sensor capture approach
+- **Mic**: `sounddevice.InputStream` with `callback` pattern, 100ms blocks (block_size = sample_rate/10), float32 dtype. Rolling buffer = `np.zeros(sample_rate)` — exactly 1 second.
+- **Buffer zeroing**: `_extract_frame()` copies buffer under `threading.Lock`, zeroes it immediately, then `del samples` after computation. Also zeroed in `stop()`. This satisfies privacy gate I7.
+- **RMS**: `sqrt(mean(samples²)) / 0.707` (normalised to full-scale sine = 1.0), clamped to 1.0.
+- **Pitch variance**: ZCR (zero-crossing rate) over 10 sub-frames → variance scaled by 0.01. No FFT per tick; low-latency.
+- **Thread safety**: audio callback writes to buffer under `threading.Lock`; `_extract_frame` reads under the same lock.
+
+### IMU SDK-gap handling
+- `_IMURelay` class wraps the BLE characteristic subscription. Currently holds `imu_ok=False` because characteristic UUID is unconfirmed (ARD §10).
+- Degradation path: `compute_mood()` is called with `imu_ok=False` → confidence ×0.7. Both-fail path (mic_ok=False AND imu_ok=False) sends NEUTRAL after 10s.
+- **When to fix**: confirm characteristic UUID from Halo firmware; implement subscription in `_IMURelay.start()`; normalise accel ÷4.0g and rotation ÷500°/s.
+
+### quantise/jitter placement
+- **Gate 2 helpers live in `main.py`** (not inference.py, not protocol.py) per contract §3.
+- `quantise_intensity(float) → {0,25,50,75,100}` with midpoint buckets at 0.125/0.375/0.625/0.875.
+- `apply_intensity_jitter(int, rng=None) → int` clamped 0–100; injectable `random.Random` for deterministic tests.
+- Pipeline: `compute_mood() → result.intensity (float) → quantise → jitter → encode_familiar_update`.
+- Golden vectors test `encode_familiar_update` directly with pre-quantised values — unaffected.
+
+### Confidence-hold timeout I2 location
+- Lives in `run()` main loop, not in inference.py. `last_send_time` resets only on successfully sent frames (not gated/suppressed ones).
+
+### Injectable clock pattern
+- `run(transport, sensor_stream, *, clock=time.monotonic)` — Juanita can inject a fake clock for I2 + both-fail timeout tests without sleeping 30s/10s.
+
+---
+
 ## Key Learnings
 
 - **Seq wraparound:** signed-16 delta dedup; reset to 0xFFFF on timeout (allows 0x0000→accept on next packet)

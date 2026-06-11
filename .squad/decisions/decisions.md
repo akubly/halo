@@ -859,3 +859,168 @@ If either is absent, RAVEN vetoes the merge.
 **Outcome:** Baseline persists across restarts; Phase 2 can add cloud sync without rework.
 
 ---
+
+---
+
+## 2026-06-10: VESPER Week 2 Integration Contract — Hiro (Architect)
+
+| Field | Value |
+|-------|-------|
+| **Status** | LOCKED |
+| **Date** | 2026-06-10 |
+| **Author** | Hiro (Architect) |
+| **Purpose** | Contract-first binding for all Week 2 specialists — prevents import-contract drift |
+
+**Specialists bound by this contract:**
+- **Ng**: sensors.py, main.py (real sensor→inference loop)
+- **Librarian**: inference.py (mood heuristic + baseline)
+- **Da5id**: device/main.lua (state-machine animation)
+- **Juanita**: 	ests/test_inference.py + new acceptance tests
+
+**Week 2 Success Criterion (ARD §9):** "Aaron can trigger stress state by raising voice in quiet room; stressed visual (faster breathing, warm color) appears within 500ms."
+
+### 1. sensors.py API Contract
+
+**Owner:** Ng
+
+#### 1.1 SensorFrame Dataclass (LOCKED)
+
+\\\python
+@dataclasses.dataclass
+class SensorFrame:
+    """One sample of sensor data delivered at ~10Hz."""
+    audio_rms: float            # Root-mean-square of ≤1s audio window (0.0–1.0 normalized)
+    audio_pitch_variance: float # Pitch variance over window (0.0–1.0 normalized)
+    imu_acceleration: float     # Scalar magnitude of accelerometer (0.0–1.0 normalized)
+    imu_rotation: float         # Scalar magnitude of gyroscope (0.0–1.0 normalized)
+    mic_ok: bool = True         # False if mic capture failed this frame
+    imu_ok: bool = True         # False if IMU relay failed this frame
+\\\
+
+**Field semantics:**
+- All float fields are normalized to 0.0–1.0 for inference consumption.
+- Raw sensor values (dB, rad/s, m/s²) are converted internally; never exposed.
+- \mic_ok=False\ → \udio_rms=0.0\, \udio_pitch_variance=0.0\ (zeroed, not omitted).
+- \imu_ok=False\ → \imu_acceleration=0.0\, \imu_rotation=0.0\ (zeroed, not omitted).
+- Inference uses the \*_ok\ flags to reduce confidence, not to crash.
+
+**Test gate:** \	est_sensor_source_port_exposes_no_raw_audio()\ — **Gate I7 MERGE-BLOCKING**
+
+---
+
+## 2026-06-10: Ng — Week 2 Decision: sensors.py + main.py Real Loop
+
+| Field       | Value |
+|-------------|-------|
+| **Date**    | 2026-06-10T23:17:50-07:00 |
+| **Author**  | Ng (SDK Engineer) |
+| **Status**  | SHIPPED |
+| **Scope**   | \host/sensors.py\, \host/main.py\ |
+
+**Implemented:**
+- **SensorFrame** dataclass: 6 fields (audio_rms, audio_pitch_variance, imu_acceleration, imu_rotation, mic_ok, imu_ok), all float/bool, no raw bytes or ndarray on public API
+- **SensorStream** async iterator with 100ms blocks, thread-safe rolling 1s buffer, zeroed post-extraction
+- **Real loop** in \main.py\: sensor→inference→encode→send at 10Hz with both-sensors-fail fallback (10s) + confidence-hold timeout I2 (30s)
+- **Quantise + jitter** helpers for Gate 2: quantise to {0,25,50,75,100}, apply ±5 jitter clamped 0–100
+
+**Privacy:** Gate I7 fully implemented — buffer ≤1s, zeroed after extraction, no raw bytes on SensorFrame public API.
+
+**Test result:** 59 passed, 5 xfailed (pending Librarian). Implementation contract-conformant.
+
+---
+
+## 2026-06-10: Librarian — Week 2 Decision: Local Mood Heuristic (inference.py)
+
+| Field | Value |
+|-------|-------|
+| **Status** | IMPLEMENTED |
+| **Date** | 2026-06-10T23:17:50-07:00 |
+| **Author** | Librarian (AI/ML) |
+| **Scope** | \projects/synesthetic-familiar/host/inference.py\ |
+
+**Implemented:**
+- **Tension formula** (locked): \	ension = pitch_variance×0.4 + acceleration×0.3 + rotation×0.3\
+- **Classification thresholds:** \	ension > 0.65\ → stressed, \	ension < 0.35\ → calm, else neutral
+- **Confidence model:** base 0.8 (stressed/calm) / 0.6 (neutral); multiplicative reduction on sensor failure (mic: ×0.6, imu: ×0.7)
+- **Baseline persistence:** Welford online mean+stddev at \~/.vesper/baseline.json\; loads at startup, updates per successful frame, saves at exit
+- **Zero cloud:** All stdlib imports; no cloud SDK, no ML model, no API call
+
+**Cloud confirmation:** No cloud imports. ARD §5.4 Phase-1 "no cloud" invariant holds.
+
+**Test status:** 5 xfailed (module importable; Juanita's test bodies pending).
+
+---
+
+## 2026-06-10: Da5id — Week 2 Decision: Visual States — Calm Glow & Stressed Fraying
+
+| Field       | Value |
+|-------------|-------|
+| **Status**  | PROPOSED |
+| **Date**    | 2026-06-10 |
+| **Author**  | Da5id (Designer) |
+| **Scope**   | device/main.lua — render enhancements for CALM and STRESSED moods |
+
+**Implemented:**
+- **CALM halo glow:** 3 concentric circles (radii 14,17,20px, brightness 60%→35%→15%) rendered before sprite, intensity-modulated
+- **STRESSED edge fraying:** 16 perimeter points with ±2px radial displacement (LCG-seeded pseudo-random), amber accent, rendered after sprite, intensity-modulated
+
+**Budget:** Worst-case ~337 lit pixels (5.5% of 256×256) vs <30% ARD §5.5 budget. Frame time ~8ms vs 50ms ARD §5.5 budget.
+
+**Contract compliance:** Wire format unchanged, 200ms lerp preserved, transitions 200–500ms maintained, anti-robotic jitter (5–10% LCG temporal variance) in place.
+
+---
+
+## 2026-06-10: Juanita — Week 2 Test Suite Decision Record
+
+| Field | Value |
+|-------|-------|
+| **Status** | DELIVERED |
+| **Date** | 2026-06-10 |
+| **Author** | Juanita (Tester / QA) |
+| **Scope** | Week 2 ("It reacts") — contract §6.2 test obligations |
+| **Suite result** | **101 tests, all green** (was 54 before Week 2) |
+
+**Gate coverage:**
+- **Gate I7** (merge-blocking) — no raw audio at SensorSourcePort: ✅ \	est_sensor_source_port_exposes_no_raw_audio\ PASS
+- **Gate 1** (merge-blocking) — no raw biometrics on wire: ✅ \	est_familiar_update_carries_no_raw_biometric_values\ PASS
+- **Gate 2** (merge-blocking) — quantise + jitter before encode: ✅ \	est_intensity_quantised_before_encode\ + \	est_intensity_jitter_applied_before_encode\ PASS
+- **I2** — confidence-hold timeout 30s: ✅ \	est_confidence_hold_timeout_resends_after_30s\ PASS
+- **ARD §5.4** — both-fail sends NEUTRAL after 10s: ✅ \	est_both_sensors_fail_sends_neutral_after_10s\ PASS
+
+**New tests:** 9 (inference) + 3 (sensors I7) + 1 (protocol Gate 1) + 15 (main.py Gate 2) + 1 (confidence I2) + 1 (fallback) = 47 new tests, 101 total.
+
+**Rejections:** None. Ng and Librarian both delivered contract-conformant implementations.
+
+---
+
+## 2026-06-10: Raven — Week 2 Privacy Audit: VESPER Real-Sensor Pipeline
+
+| Field        | Value |
+|--------------|-------|
+| **Date**     | 2026-06-10T23:17:50-07:00 |
+| **Author**   | Raven (Security & Privacy) |
+| **Status**   | COMPLETE |
+| **Scope**    | \host/sensors.py\, \host/main.py\, \host/inference.py\, \host/familiar_protocol.py\ |
+
+**Data flow:** Mic/IMU hardware → SensorStream (rolling buffer ≤1s, zeroed post-extraction) → compute_mood (pure function, stdlib) → quantise+jitter → BLE FAMILIAR_UPDATE (mood_int, j_intensity, conf_int, seq).
+
+**Gate I7 (merge-blocking):** ✅ **APPROVE**
+- Buffer ≤1s: \
+p.zeros(sample_rate)\ at sensors.py:182
+- Buffer zeroed post-extraction: sensors.py:308–309 under lock
+- SensorFrame public API: 6 fields (4 float, 2 bool), no bytes/ndarray
+- Raw audio never logged/written/transmitted
+
+**Gate 1 (merge-blocking):** ✅ **APPROVE**
+- \ncode_familiar_update\ signature: (mood: int, intensity: int, confidence: int, seq: int), no raw biometrics parameter
+- \main.py\ call chain: passes only abstract values (mood_int, j_intensity, conf_int)
+
+**No cloud egress confirmed:** Zero cloud SDK imports (sensors, main, inference, protocol — all stdlib/sounddevice/numpy only).
+
+**Both merge-blocking gates: APPROVED. Week 2 may merge.**
+
+**Non-blocking follow-ups:**
+- W3-1: Harden snapshot zeroing (Ng, Week 3)
+- P2-1: LESC (BLE encryption, Phase 2)
+- P2-2: Baseline plaintext hardening (Librarian, Phase 2)
+

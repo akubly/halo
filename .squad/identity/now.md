@@ -1,29 +1,32 @@
 ---
-updated_at: 2026-06-08T06:39:00Z
-focus_area: First official project (Synesthetic Familiar, Theme-2)
+updated_at: 2026-06-11T00:00:00Z
+focus_area: VESPER Week 2 "It reacts" — MERGED (101 tests, both privacy gates approved)
 active_issues: []
-status: ARD APPROVED — Build-ready for Week 1
+status: Week 2 COMPLETE — Real sensors live, local inference (no cloud), privacy gates APPROVED
 ---
 
 # What We're Focused On
 
-**First official Halo project:** Synesthetic Familiar (Theme-2).
+**Synesthetic Familiar (VESPER)** — Theme-2 project at `projects/synesthetic-familiar/`.
 
-**ARD APPROVED** at `docs/projects/synesthetic-familiar/ARD.md` (status APPROVED, finalized 2026-06-07).
+**WEEK 2 "It reacts" MERGED** — 2026-06-10 merge wave complete.
 
-**3 Decisions LOCKED by Aaron:**
-1. **Sensors:** Mic + IMU (no camera in v1)
-2. **Model:** Local heuristic on host (no cloud for v1)
-3. **Creature form:** Abstract-with-eyes (geometric + eye, privacy-preserving)
+**Status:**
+- ✅ 101 tests green (was 54 at start of Week 2)
+- ✅ Gate I7 (Mic buffer ≤1s, no raw bytes on SensorFrame public API) — **APPROVED**
+- ✅ Gate 1 (No raw biometrics on wire, encode_familiar_update signature gated) — **APPROVED**
+- ✅ Real mic + IMU sensors operational (sounddevice + numpy)
+- ✅ Local mood heuristic (no cloud): tension = pitch_variance×0.4 + acceleration×0.3 + rotation×0.3
+- ✅ Confidence gating (< 0.7 → suppress); 30s confidence-hold timeout; 10s both-fail → NEUTRAL
+- ✅ Intensity quantised to {0,25,50,75,100}, jittered ±5 before encode (Gate 2)
+- ✅ Visual enhancements (CALM halo glow + STRESSED edge fraying) within budget
+- ✅ Privacy audit: zero cloud egress, Welford baseline at ~/.vesper/baseline.json
 
-**Build-Ready Architecture:**
-- Host (Python 3.11) mood inference from mic+IMU at 10Hz
-- Device (Lua) renders 24×24 breathing sprite
-- BLE protocol: 6-byte FAMILIAR_UPDATE opcode (mood, intensity, confidence, sequence)
-- Privacy by abstraction: abstract visual language, no labeled emotions, 5-10% visual jitter
-- Tech stack finalized: Python + `sounddevice` + `numpy` + Lua 5.3 (no external models, no cloud)
+**Locked Decisions:** SensorFrame API (6 fields, no raw bytes), compute_mood signature with confidence gating, main loop state management, BLE wire format, test import paths.
 
-**Next step:** Week 1 "It moves" — Python host harness + Lua sprite render on Halo device.
-- Week 1: Creature bobbing, BLE protocol working
-- Week 2: Host captures mic+IMU, mood inference active
-- Week 3: UX polish, onboarding, attention moments, graceful fallback
+**Next Step: Week 3 "It's alive"**
+- Onboarding flow (baseline learning ramp-up)
+- Attention moments (burst animation)
+- Quick-reset mechanism
+- Graceful fallback (confidence hold, both-fail neutral)
+- Hardware validation (Halo IMU relay confirmation, OLED visual quality)

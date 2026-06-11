@@ -1,12 +1,86 @@
-# Project Context
+# Raven (Security & Privacy) — Session History
 
-- **Owner:** Aaron Kubly
-- **Project:** halo — mono-repo playground for authoring apps on Halo smart glasses
-- **My layer:** Threat models, sensor-data hygiene, consent flows, secrets
-- **Sensitive surfaces:** camera, microphone, BLE pairing, any third-party API call carrying sensor data
-- **Created:** 2026-06-01
+**Project:** halo — Halo smart glasses playground  
+**Role:** Threat modeling, sensor-data hygiene, consent flows  
+**Created:** 2026-06-01
+
+## Milestones Completed
+
+### Phase 1: Threat Surface Inventory & Privacy Ideation (2026-06-01 to 06-02)
+Identified 4 critical gaps in Halo hardware spec:
+- No consent indicator (visual/audible) for camera or mic — violates bystander-consent laws.
+- Cloud data-flow opacity (Noa agent's handling undocumented).
+- Pairing mode not time-limited — 8s button hold can trigger accidentally.
+- No documented data retention policy.
+
+Pitched 8 privacy-as-feature ideas + 4 cross-pollinated mash-ups + 3 privacy-as-feature amendments. Key resonance: Librarian #7 (Episodic Stitching), Hiro #2 (Temporal Viewport), Enzo #4 (Memory Ledger).
+
+**Insight:** Privacy constraints unlock architecture differentiation. Halo's ability to prove bystander redaction = moat against lawsuit liability.
+
+### Phase 2: Theme 2 User Stories & RAVEN-T2-1 Constraints (2026-06-03)
+Authored 3 user stories for Synesthetic Familiar privacy guardrails:
+- [RAVEN-T2-1] Bystander opaqueness: abstract patterns, no labeled state inference.
+- [RAVEN-T2-2] Wearer sync control: toggle + per-contact broadcast rules.
+- [RAVEN-T2-3] Auditor verification: no server-side logging, encryption proof.
+
+**Key design decision:** Intensity quantised to {0,25,50,75,100}, not continuous float. 5-10% jitter at host **before** encode, not Lua. Bob frequency snapped to discrete tiers (not breathing-rate mapping).
+
+### Phase 3: Week 1 Privacy Pass (2026-06-09)
+Audit of mock pipeline (all stubs, zero real sensors).
+- **Finding:** Data flow safe (Mock Python → 6-byte BLE → render). Secrets clean. No API keys, tokens, `.env`.
+- **RAVEN-T2-1 locked for Week 2:**
+  - Intensity quantised {0,25,50,75,100} (no raw float).
+  - 5-10% jitter at host before encode.
+  - Bob frequency snapped to tiers.
+  - CI test `test_familiar_update_carries_no_raw_biometric_values` required before Week 2 real-sensor merge.
+- **Veto authority:** If either gate is absent at real-sensor merge, RAVEN blocks.
+
+### Phase 4: Week 2 Privacy Audit (2026-06-10T23:17:50-07:00)
+Complete audit of real-sensor pipeline (sensors.py, main.py, inference.py, familiar_protocol.py). 101 tests passing.
+
+**Both merge-blocking gates: APPROVED.**
+
+#### Gate I7 (Mic buffer discipline) — APPROVED
+- Rolling buffer exactly 1s (`np.zeros(sample_rate)`), never grows.
+- Zeroed under lock post-snapshot (`sensors.py:308`, `self._buffer[:] = 0.0`).
+- Also zeroed on stop() (`sensors.py:244`).
+- SensorFrame public API: 4 float + 2 bool only. No bytes/ndarray/list.
+- Raw audio never logged (callback logs sounddevice status only), written, transmitted.
+- `del samples` at line 319 is correct belt-and-suspenders label but does NOT zero heap memory — real protection is in-place buffer zero at line 308. Non-blocking hardening for Week 3.
+
+#### Gate 1 (No raw biometrics on wire) — APPROVED
+- `encode_familiar_update` signature: (mood, intensity, confidence, seq) — no raw sensor param.
+- `main.py` passes only: mood_int (0-3), quantised+jittered intensity (int), confidence×100 (int), seq counter. Zero raw values.
+- Neutral fallback uses hardcoded constants (no leakage).
+
+#### Cloud egress — CLEAN
+- `inference.py`: stdlib only (dataclasses, datetime, json, math, pathlib, typing).
+- `sensors.py`: numpy + sounddevice (local audio), no cloud SDK.
+- `main.py`: frame_sdk (BLE SDK, not cloud), others stdlib.
+- Grep `requests|boto3|openai|anthropic|google|azure|httpx` in host/*.py: zero matches.
+
+#### Quantise + jitter — PASS
+- Quantise: {0,25,50,75,100} correct 5-level bucketing per contract.
+- Jitter: ±5 via `random.randint(-5,5)`, clamped 0-100, **host-side before encode**.
+- At lower bound of original spec (±5-10%). Non-blocking; LESC Phase 2 is real protection.
+- Jitter is obscurity + anti-robotic polish, NOT cryptographic guarantee. BLE remains unauthenticated/unencrypted (Phase 1 accepted risk).
+
+#### Non-blocking follow-ups
+- **W3-1:** Harden snapshot zeroing (Ng, Week 3). Add `samples[:] = 0.0` before del.
+- **P2-1:** LESC (BLE encryption/auth, Phase 2).
+- **P2-2:** Baseline plaintext hardening at `~/.vesper/baseline.json` (Librarian, Phase 2, OS keychain).
+- **P2-3:** Jitter range review post-LESC (Phase 2).
+
+---
 
 ## Learnings
+
+1. **`del samples` is not a security primitive.** Numpy snapshot refcount decrement ≠ memory zero. In-place buffer zero is actual protection.
+2. **Confidence byte escapes quantisation.** Transmitted at ~1% precision; not a direct biometric, acceptable Phase 1, but future protocols should consider whether reliability signals need discrete tiers too.
+3. **Jitter placement is the defence layer.** Host-side quantisation + jitter before encode prevents rate leakage from transmitted intensity byte. Lua-only jitter is insufficient.
+4. **Phase 1 accepted risks have Phase 2 remediations.** BLE unauthenticated + baseline plaintext + narrow jitter range are known risks with locked Phase 2 owners.
+
+---
 
 ### Threat Surface Inventory (2026-06-01)
 
@@ -176,3 +250,52 @@ Pitched security/privacy-lens codename candidates for the Synesthetic Familiar. 
 **Veto authority:** If either Week 2 gate is absent at real-sensor merge, RAVEN blocks the PR.
 
 **Outcome:** Week 1 green. Week 2 privacy gates formalized.
+
+---
+
+## Session 2026-06-10T23:17:50-07:00: VESPER Week 2 Privacy Audit
+
+**Scope:** Week-2 real-sensor pipeline — `sensors.py`, `main.py`, `inference.py`, `familiar_protocol.py`. 101 tests passing. First audit of live mic capture + IMU relay + local mood heuristic.
+
+**Both merge-blocking gates: APPROVED. Week 2 may merge.**
+
+### Gate I7 (Mic buffer discipline) — APPROVED
+- Rolling buffer is exactly 1 second (`np.zeros(sample_rate)`) — never grows.
+- Buffer zeroed under lock immediately after snapshot copy (`self._buffer[:] = 0.0` at `sensors.py:308`).
+- Buffer also zeroed on `stop()` (`sensors.py:244`).
+- `SensorFrame` public API: 4 `float` + 2 `bool` fields only. No `bytes`, `ndarray`, list anywhere.
+- Raw audio never logged (callback logs only sounddevice `status` flag), never written to disk, never transmitted.
+- `del samples` at line 319 is correct belt-and-suspenders labeling but does not zero heap memory — real protection is the in-place zero at line 308. Non-blocking hardening item for Week 3.
+
+### Gate 1 (No raw biometrics on wire) — APPROVED
+- `encode_familiar_update` signature: `(mood, intensity, confidence, seq)` — no raw sensor parameter exists.
+- `main.py` passes only: `mood_int` (0–3), quantised+jittered intensity (int), `confidence × 100` (int), sequence counter. Zero raw values cross the wire.
+- Neutral fallback uses hardcoded constants — no sensor leakage.
+
+### Cloud egress — CLEAN
+- `inference.py`: stdlib only (`dataclasses, datetime, json, math, pathlib, typing`). Zero network imports.
+- `sensors.py`: `numpy` + `sounddevice` (local audio), no cloud SDK.
+- `main.py`: `frame_sdk` (BLE SDK, not cloud), all others stdlib.
+- Grep for `requests|boto3|openai|anthropic|google|azure|httpx`: zero matches in `host/*.py`.
+
+### Quantise + jitter — PASS
+- Quantise: `{0, 25, 50, 75, 100}` — correct 5-level bucketing per contract.
+- Jitter: ±5 via `random.randint(-5, 5)`, clamped 0–100, applied **host-side before encode**.
+- Jitter is at the lower bound of original Week 1 spec (±5–10%). Non-blocking; LESC in Phase 2 is the real protection.
+- Noted explicitly: jitter is obscurity + anti-robotic polish, NOT a cryptographic privacy guarantee. BLE remains unauthenticated/unencrypted (Phase 1 accepted risk).
+
+### Desktop mic indicator — PASS
+- `sounddevice.InputStream` uses OS audio subsystem normally. No raw driver bypass. OS-managed indicator operates as expected.
+
+### Residual risks (non-blocking)
+1. **`del samples` doesn't zero heap** — add `samples[:] = 0.0` before del for belt-and-suspenders hardening (Week 3, Ng).
+2. **Confidence byte not quantised** — transmitted at ~1% precision; not a direct biometric, acceptable for Phase 1.
+3. **BLE unauthenticated/unencrypted** — LESC deferred to Phase 2 (Phase 1 accepted risk, single-user playground).
+4. **`~/.vesper/baseline.json` plaintext** — derived arousal statistics stored unencrypted; Phase 2 OS keychain consideration (Librarian).
+
+**Decision output:** `.squad/decisions/inbox/raven-week2-privacy-audit.md`
+
+**Learned:**
+- `del samples` on a numpy snapshot is a CPython refcount decrement, not a memory zero. The in-place buffer zero (`self._buffer[:] = 0.0`) is the actual protection. Belt-and-suspenders intent is good but the comment should clarify this distinction.
+- Confidence byte escapes quantisation — future protocols should consider whether reliability signals also need discrete tiers, especially once LESC lands and only statistical inference (not raw sniffing) remains as an attack vector.
+- Jitter at ±5 absolute points on a 0–100 scale is weaker obscurity than originally spec'd (±5–10%). Once LESC encrypts the channel, jitter's primary role becomes anti-robotic naturalness, not privacy, and the range can be relaxed.

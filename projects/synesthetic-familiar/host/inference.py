@@ -11,53 +11,183 @@ Mood enum (matches wire format, ARD §5.2):
   2 = stressed
   3 = attention
 """
-# TODO: implement compute_mood body, baseline learning, fallback paths
-
 from __future__ import annotations
 
 import dataclasses
+import datetime
+import json
+import math
+from pathlib import Path
 from typing import Literal
 
-# Tunable thresholds — ARD §5.4 population defaults.
-# These are starting values derived from aggregate user studies; baseline
-# learning (personal mean + 1.5σ after day 3) replaces them per-user.
-# Do not hard-code call sites to these values; always import the constants.
+# Tunable thresholds — ARD §5.4 population defaults (days 1–3).
+# After day 3, baseline learning replaces STRESS_THRESHOLD with a personal value.
+# CONFIDENCE_GATE is imported by Juanita's tests — do not rename.
 STRESS_THRESHOLD: float = 0.65
 CALM_THRESHOLD: float = 0.35
 CONFIDENCE_GATE: float = 0.7
 
+# §2.6 aliases (same values, distinct names for documentation clarity)
+POPULATION_STRESS_THRESHOLD: float = STRESS_THRESHOLD
+POPULATION_CALM_THRESHOLD: float = CALM_THRESHOLD
+
 MoodEnum = Literal["neutral", "calm", "stressed", "attention"]
-MOOD_TO_INT: dict[MoodEnum, int] = {
+MOOD_TO_INT: dict[str, int] = {
     "neutral": 0,
     "calm": 1,
     "stressed": 2,
     "attention": 3,
 }
 
+_BASELINE_PATH: Path = Path("~/.vesper/baseline.json").expanduser()
+
 
 @dataclasses.dataclass
 class MoodResult:
     mood: MoodEnum
-    mood_int: int        # Wire-format enum (0-3)
-    intensity: float     # 0.0–1.0
+    mood_int: int        # Wire-format enum (0–3); matches familiar_protocol.Mood
+    intensity: float     # 0.0–1.0 continuous
     confidence: float    # 0.0–1.0
-    gated: bool          # True if confidence < CONFIDENCE_GATE (do not send)
+    gated: bool          # True if confidence < CONFIDENCE_GATE (main loop must not send)
 
+
+@dataclasses.dataclass
+class Baseline:
+    """Personal tension baseline accumulated over time (§2.6)."""
+    mean: float          # Running mean of tension signal
+    stddev: float        # Sample stddev (0.0 until n≥2)
+    sample_count: int    # Number of tension samples seen
+    created_at: str      # ISO 8601 creation timestamp (set once, never updated)
+
+
+# ── Baseline persistence ──────────────────────────────────────────────────────
+
+def load_baseline(path: Path = _BASELINE_PATH) -> Baseline | None:
+    """Load baseline from disk. Returns None if file is missing or corrupt."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return Baseline(**data)
+    except (FileNotFoundError, json.JSONDecodeError, TypeError, KeyError):
+        return None
+
+
+def save_baseline(baseline: Baseline, path: Path = _BASELINE_PATH) -> None:
+    """Persist baseline atomically (write tmp → rename, ARD §5.4)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".json.tmp")
+    tmp.write_text(
+        json.dumps(dataclasses.asdict(baseline), indent=2), encoding="utf-8"
+    )
+    tmp.replace(path)
+
+
+def update_baseline(baseline: Baseline | None, tension: float) -> Baseline:
+    """
+    Online Welford update of running mean and sample stddev.
+
+    Creates a fresh Baseline on first call (baseline=None).  The Baseline
+    dataclass fields are LOCKED (§2.6), so M2 is reconstructed from stored
+    stddev rather than adding a new field:
+        M2 = stddev² × (sample_count − 1)
+    """
+    if baseline is None:
+        return Baseline(
+            mean=tension,
+            stddev=0.0,
+            sample_count=1,
+            created_at=datetime.datetime.now().isoformat(),
+        )
+
+    n = baseline.sample_count + 1
+    m2_prev = baseline.stddev ** 2 * max(baseline.sample_count - 1, 0)
+
+    delta = tension - baseline.mean
+    new_mean = baseline.mean + delta / n
+    delta2 = tension - new_mean
+    m2_new = m2_prev + delta * delta2
+
+    new_stddev = math.sqrt(m2_new / (n - 1)) if n > 1 else 0.0
+
+    return Baseline(
+        mean=new_mean,
+        stddev=new_stddev,
+        sample_count=n,
+        created_at=baseline.created_at,  # Preserve original timestamp
+    )
+
+
+# ── Mood inference ────────────────────────────────────────────────────────────
 
 def compute_mood(
     audio_rms: float,
     audio_pitch_variance: float,
     imu_acceleration: float,
     imu_rotation: float,
+    *,
+    mic_ok: bool = True,
+    imu_ok: bool = True,
+    baseline: Baseline | None = None,
 ) -> MoodResult:
     """
-    Compute mood from sensor inputs.
+    Pure function: sensor inputs → MoodResult.  No I/O, no clock, no global state.
 
-    Weights (locked, ARD §5.4):
-      pitch_variance × 0.4 + acceleration × 0.3 + rotation × 0.3
+    Weights (ARD §5.4, LOCKED):
+        tension = pitch_variance × 0.4 + acceleration × 0.3 + rotation × 0.3
 
-    Returns MoodResult; caller must check .gated before sending to device.
+    Threshold strategy:
+        baseline=None  → population defaults (STRESS_THRESHOLD / CALM_THRESHOLD)
+        baseline given → personal stress threshold = mean + 1.5 × stddev
+                         calm threshold stays at CALM_THRESHOLD (§2.6 defines
+                         only a personal stress formula — no personal calm formula)
+
+    Confidence reduction on sensor failure (§2.2):
+        mic_ok=False  → confidence × 0.6
+        imu_ok=False  → confidence × 0.7
+
+    Caller (main.py) is responsible for:
+        • acting on .gated (do not send when True)
+        • confidence-hold timeout (I2, ~30 s)
+        • both-sensors-fail fallback (ARD §5.4, 10 s)
+        • intensity quantisation + jitter before encode (Gate 2)
     """
-    # TODO: implement weighted tension score, threshold logic, confidence calc
-    # TODO: implement baseline learning (pop defaults d1-3; personal mean+1.5σ after)
-    raise NotImplementedError
+    # Weighted tension score (locked weights, ARD §5.4)
+    tension = (
+        audio_pitch_variance * 0.4
+        + imu_acceleration * 0.3
+        + imu_rotation * 0.3
+    )
+
+    # Select thresholds
+    if baseline is not None:
+        stress_threshold = baseline.mean + 1.5 * baseline.stddev
+    else:
+        stress_threshold = STRESS_THRESHOLD
+    calm_threshold = CALM_THRESHOLD
+
+    # Classify mood with base confidence
+    if tension > stress_threshold:
+        mood: MoodEnum = "stressed"
+        intensity = tension
+        confidence = 0.8
+    elif tension < calm_threshold:
+        mood = "calm"
+        intensity = 1.0 - tension
+        confidence = 0.8
+    else:
+        mood = "neutral"
+        intensity = 0.5
+        confidence = 0.6
+
+    # Sensor-failure confidence reduction (§2.2)
+    if not mic_ok:
+        confidence *= 0.6
+    if not imu_ok:
+        confidence *= 0.7
+
+    return MoodResult(
+        mood=mood,
+        mood_int=MOOD_TO_INT[mood],
+        intensity=intensity,
+        confidence=confidence,
+        gated=(confidence < CONFIDENCE_GATE),
+    )

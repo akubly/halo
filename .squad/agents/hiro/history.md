@@ -1,22 +1,51 @@
-# Project Context
+# Hiro (Architect) — Session History
 
-- **Owner:** Aaron Kubly
-- **Project:** halo — mono-repo playground for authoring apps on Halo smart glasses using the Brilliant SDK
-- **Stack:** TBD per package; SDK languages are Python, Flutter (Dart), Web Bluetooth (JS/TS). Lua 5.3 runs on-device.
-- **Created:** 2026-06-01
+**Project:** halo — Halo smart glasses playground  
+**Role:** Architecture + integration contracts  
+**Created:** 2026-06-01
 
-## Learnings Summary
+## Milestones Completed
 
-### Halo Architecture Foundations (2026-06-01)
-- **Host-app model**: Glasses are peripherals; host drives logic. 3 canonical SDKs (Python, Flutter, Web Bluetooth), Lua on-device. Mono-repo can stay flat; SDK-per-workspace only if 3+ packages share tooling.
-- **Lineage**: Monocle (closed) → Frame (Python+Flutter) → Halo (web+lua event loop rewrite). SDK API surface survives; on-device semantics churn. Brilliant prioritizes velocity over backward compat.
+### Phase 1: ARD & Theme 2 VESPER (Locked 2026-06-07)
+- **Architecture:** Host-peripheral model (Python host, Lua device). Mood inference on host; render on device. M55 NPU gates, doesn't infer.
+- **Autonomy:** Hybrid host-primary. Confidence gating on host. Device has BLE-drop fallback (neutral only).
+- **Design:** Mood/render decoupling. Creature uses abstract breathing/color. Bystander opaque. 24×24 sprite at ~1.5% lit pixels.
+- **Privacy:** 5-10% jitter + quantised intensity + abstraction. Raw audio/IMU never leave host.
 
-### Team Ideation & Themes (2026-06-02 to 2026-06-03)
-- **Theme 1**: Consent-Aware Memory (privacy as protocol infrastructure)
-- **Theme 2**: The Synesthetic Familiar (familiar as state machine, mood/render decoupling)
-- **Key insight**: Constraints-as-architecture (privacy, display budget, battery shape mono-repo structure, BLE protocol, SDK contracts).
-- **Cross-cutting concern**: Device Autonomy Tiers (local, hybrid, collective).
-- **Strongest mash-up**: Self-Describing Privacy Mesh (distributed protocols + cryptographic consent + edge enforcement).
+### Phase 2: ARD Persona Review (2026-06-09)
+Applied 15 findings from Design+Security panels. Key fixes:
+- Heap ownership is device-local (explicit in §5.1, §5.2).
+- Quick-reset is device-owned (double-tap detected locally, device snaps to NEUTRAL, no round-trip).
+- Confidence gating authority is host-only (device gating is optional defense-in-depth).
+- 30s confidence-hold timeout resolves gating vs. liveness tension.
+- Baseline persistence locked to `~/.vesper/baseline.json` (host filesystem, Phase 1).
+
+### Phase 3: Week 1 Scaffold (2026-06-09)
+Created `projects/synesthetic-familiar/` with file layout, ownership table, initial stubs for all agents.
+
+### Phase 4: Week 2 Integration Contract (Locked 2026-06-10)
+Locked contract binding Ng (sensors.py, main.py), Librarian (inference.py), Da5id (device/main.lua), Juanita (tests), Raven (privacy audit).
+
+**Key locked decisions:**
+- SensorFrame: 6 fields (4 float, 2 bool), no raw bytes, mic_ok/imu_ok flags for confidence reduction.
+- compute_mood signature with mic_ok, imu_ok, baseline kwargs; returns MoodResult with gated flag.
+- Gating authority: main.py (not inference.py).
+- Confidence-hold timeout (I2, 30s) + both-sensors-fail fallback (10s) both in main.py.
+- Intensity quantise {0,25,50,75,100} + jitter ±5 before encode (Gate 2).
+- Two hard merge-blocking gates: Gate I7 (mic buffer ≤1s, no raw bytes on SensorFrame), Gate 1 (no raw biometrics on wire).
+
+### Phase 5: Week 2 Completion (2026-06-10)
+- Hiro locked contract. Ng shipped sensors.py + main.py (59 passed, 5 xfailed). Librarian shipped inference.py (5 xfailed, importable). Da5id proposed visual enhancements. Juanita delivered 47 new tests (101 total, all green). Raven approved both privacy gates.
+
+---
+
+## Learnings
+
+1. **Contract-first prevents drift.** Week 1 surfaced import-contract misalignment (Mood enum, seq_is_newer function). Week 2's locked contract prevented recurrence.
+2. **Explicit > Implied.** ARD §5.1 heap ownership was obvious but unlocked. When Test Strategy invented its own interpretation, explicitly stated rules became mandatory.
+3. **Authority must be named.** Confidence gating could reasonably live in two places (host + device). Naming host as sole authority eliminated ambiguity.
+4. **Tension resolution, not tension removal.** Confidence gate (< 0.7 → suppress) + stuck-creature timeout (30s force-send) coexist perfectly when both invariants are named.
+5. **Storage tier locks tests.** Baseline persistence was "Phase 1 can use host filesystem" but unlocked. Juanita blocked until ARD named `~/.vesper/baseline.json` explicitly.
 
 ---
 
@@ -205,3 +234,11 @@ Applied 15 accepted findings (B1, B2, I1, I2, I4, I5, I6, I7, I9, I12, M1–M5) 
 ## Learnings
 
 2026-06-09: PR #1 review pass — 7 doc-consistency fixes across ARD.md and decisions.md: `struct.pack('<HH', ...)` → `'<H'` for single uint16; NEUTRAL reachability has two distinct paths (sensor fallback vs confidence-hold timeout which sends last-computed mood, not necessarily NEUTRAL); raw audio/IMU never leaves host (not BLE pipe); full FAMILIAR_UPDATE wire format in privacy section; Week-1 jitter criterion now forbids frame stutter, not intentional anti-robotic jitter; `familiar_protocol` is BLE encode/decode only, not mic/inference; confidence-hold timer resets on successfully sent frames only, not suppressed/gated ones.
+
+2026-06-10: Week 2 Integration Contract locked (`.squad/decisions/inbox/hiro-week2-integration-contract.md`). Contract-first approach to prevent Week-1 style import-contract drift. Key decisions locked:
+- **SensorFrame** adds `mic_ok`/`imu_ok` flags so inference can reduce confidence on sensor failure (zeroed fields + flag, not exception).
+- **compute_mood** signature adds `mic_ok`, `imu_ok`, `baseline` kwargs; returns `MoodResult` with `.gated` flag.
+- **Gating authority is main.py**, not inference.py — inference computes the flag, main loop decides to suppress.
+- **Confidence-hold timeout (I2)** and **both-sensors-fail fallback** both live in main.py state, not inference.
+- **Intensity quantisation to {0,25,50,75,100} + ±5 jitter** added as Gate 2 (new requirement from Aaron). Quantise+jitter helpers live in main.py; encode accepts final int.
+- **Two hard gates** for merge: (1) `test_familiar_update_carries_no_raw_biometric_values` (exists), (2) `test_intensity_quantised_before_encode` (new).

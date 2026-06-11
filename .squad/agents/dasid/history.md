@@ -81,3 +81,33 @@ Pitched design-lens codename candidates for the Synesthetic Familiar. Team conve
 **Glance-ergonomics verified:** Eye contrast 12:1, 91 lit pixels (1.5% canvas), positioned at 7 o'clock rim (visible on glance, not in focal center).
 
 **Outcome:** Sprite asset ready for integration into Ng's render loop.
+
+---
+
+## Session 2026-06-10: VESPER Week 2 Visual States — Calm Glow & Stressed Fraying
+
+**Delivered:** Visual state depth for CALM and STRESSED moods per ARD §5.5.
+
+### Calm Halo Glow (mood=1)
+- 3 concentric rings at radii 14/17/20px (from sprite center)
+- Decreasing brightness: 60% → 35% → 15% of base teal color
+- Intensity-modulated: halo dims as intensity drops (0-100 → 0-100% brightness)
+- Bresenham midpoint circle algorithm for SDK-agnostic rendering (no circle() primitive confirmed)
+
+### Stressed Edge Fraying (mood=2)
+- 16 sample points around sprite perimeter
+- Per-frame pseudo-random displacement ±2px (LCG-seeded for temporal jitter)
+- Bright amber accent pixels scattered at sprite boundary
+- Intensity-modulated amplitude: more stress = more fraying
+
+### Learnings
+1. **SDK gap pattern**: Used set_pixel() fallback for circle() — same pattern as Week 1 bitmap() gap. Bresenham is ~2x slower but always works.
+2. **Render budget verification**: Halo adds ~230 pixels (3.8% canvas), fraying adds ~16 pixels (0.3%). Combined with sprite (91 pixels), total worst-case is ~5.5% canvas — well under 30% cap.
+3. **Layering order matters**: Halo draws BEFORE creature (glow behind), fraying draws AFTER (noise on top). Z-order from clear() to show().
+4. **Anti-robotic jitter**: The LCG seed advances each frame, giving 5-10% per-frame visual variance without jarring discontinuities. Seed persists in state so fraying evolves smoothly.
+5. **Intensity lerp is untouched**: All visual enhancements read `state.render_int` (the lerped value), so 200ms transitions are preserved.
+
+### Hardware Validation Required
+- [ ] Confirm Bresenham circle visual quality on actual OLED (aliasing, brightness consistency)
+- [ ] Measure frame time with halo rendering (~230 additional set_pixel calls) — expect <5ms overhead
+- [ ] Verify edge fraying LCG produces visually pleasing noise (not too patterned, not too chaotic)
