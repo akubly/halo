@@ -69,6 +69,9 @@ This produces: `y = base ± 2` over a smooth 4-second cycle.
 - 0.15Hz is the *calm* state (Week 2) — slower breathing when relaxed
 - 0.25Hz is *neutral* — baseline resting state before mood inference kicks in
 - Week 1 has no calm/stress states — neutral bob only
++ Week 1 renders all moods the host sends (neutral/calm/stressed palettes +
+  per-mood bob frequency).  Genuinely deferred: halo glow (Week 2 calm),
+  edge fraying (Week 2 stress), attention jump (Week 2-3).
 
 ---
 

@@ -4,9 +4,12 @@
   ARD §5.1 (on-device spec), §5.2 (wire format), §5.5 (render spec).
   Sprite position and animation spec from Da5id — sprites/README.md.
 
-  Week 1 scope: FAMILIAR_UPDATE decode → sprite bob (neutral state only).
-  Week 2 adds: calm/stressed palette shifts, halo glow, edge fraying.
-  Week 3 adds: attention jump, double-tap FAMILIAR_RESET, IMU-peak callback.
+  Week 1 scope: FAMILIAR_UPDATE decode → sprite bob with full mood rendering
+  (all four mood enums: neutral/calm/stressed/attention — palette + per-mood
+  bob frequency).  Host harness mock-cycles NEUTRAL→CALM→STRESSED to drive
+  this.  Genuinely deferred: halo glow (Week 2 calm), edge fraying (Week 2
+  stress), attention jump (Week 2-3), double-tap FAMILIAR_RESET (Week 3).
+  Week 3 adds: double-tap FAMILIAR_RESET, IMU-peak callback.
 
   Da5id sprite swap-in: set SPRITE_BITMAP_READY = true and populate
   SPRITE_BITMAP (packed bytes) once frame.display.bitmap() format is
