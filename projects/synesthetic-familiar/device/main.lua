@@ -243,8 +243,8 @@ local function draw_creature(cx, cy, mood_idx)
   for row = 1, SPRITE_H do
     local row_str = SPRITE_ROWS[row]
     for col = 1, SPRITE_W do
-      local idx = tonumber(row_str:sub(col, col))
-      if idx and idx > 0 then
+      local idx = row_str:byte(col) - 48  -- byte() avoids sub() alloc; 48 = ASCII '0'
+      if idx > 0 then
         local color = pal[idx]
         if color then
           frame.display.set_pixel(ox + col - 1, oy + row - 1, color)

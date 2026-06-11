@@ -25,6 +25,7 @@ from typing import Callable, Protocol, runtime_checkable
 from host.familiar_protocol import (
     Mood,
     FamiliarAck, FamiliarReset,
+    OPCODE_FAMILIAR_ACK, OPCODE_FAMILIAR_RESET,
     SequenceCounter,
     dispatch_device_message,
     encode_familiar_update,
@@ -193,7 +194,12 @@ async def run(transport: Transport) -> None:
         elif isinstance(msg, FamiliarReset):
             logger.info("← FAMILIAR_RESET  (device snapped to neutral on double-tap)")
         elif msg is None:
-            logger.warning("← unknown opcode 0x%02x — ignored", data[0] if data else 0)
+            opcode = data[0] if data else 0
+            if opcode in (OPCODE_FAMILIAR_ACK, OPCODE_FAMILIAR_RESET):
+                name = "FAMILIAR_ACK" if opcode == OPCODE_FAMILIAR_ACK else "FAMILIAR_RESET"
+                logger.warning("← malformed %s packet (len=%d) — ignored", name, len(data))
+            else:
+                logger.warning("← unknown opcode 0x%02x — ignored", opcode)
 
     transport.on_receive(on_device_msg)
     await transport.connect()
