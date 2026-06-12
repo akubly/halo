@@ -251,15 +251,6 @@ class TestLoadBaselineFailSafe:
             "load_baseline must reject stddev='EVIL' (non-numeric)."
         )
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason=(
-            "ESCALATION — inference.py:78-85 load_baseline does not guard stddev >= 0. "
-            "The validation checks math.isfinite(b.stddev) but NOT b.stddev >= 0.0. "
-            "Negative stddev is physically impossible and would corrupt Welford stats. "
-            "This is a Librarian (inference.py) fix gap — Juanita rejects, Librarian owns."
-        ),
-    )
     def test_negative_stddev_returns_none(self, tmp_path):
         """stddev=-1.0 → None (stddev must be ≥ 0)."""
         p = tmp_path / "baseline.json"

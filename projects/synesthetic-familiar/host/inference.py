@@ -77,7 +77,7 @@ def load_baseline(path: Path = _BASELINE_PATH) -> Baseline | None:
             return isinstance(v, (int, float)) and not isinstance(v, bool)
         if not (
             _is_real(b.mean) and math.isfinite(b.mean)
-            and _is_real(b.stddev) and math.isfinite(b.stddev)
+            and             _is_real(b.stddev) and math.isfinite(b.stddev) and b.stddev >= 0.0
             and _is_real(b.sample_count) and b.sample_count >= 0
         ):
             raise ValueError(
