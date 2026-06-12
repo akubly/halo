@@ -59,4 +59,4 @@ Six architectural SDK gaps identified through community Monocle + Frame projects
 
 ---
 
-*See `.squad/decisions/decisions.md` for full decision entry.*
+*See `.squad/decisions.md` for full decision entry.*

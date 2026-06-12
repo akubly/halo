@@ -12,7 +12,7 @@
 
 **Previous Sessions:**
 - Initial research (2026-06-01): Mapped Sensor Pipeline → Reference Architecture. Documented Brilliant's AI evolution (Monocle → Frame → Halo). Audited community AI projects; validated "only Gemini ships" hypothesis. See history-archive.md for full learnings.
-- Turn 3 (2026-06-02): Community AI Projects validation via GitHub landscape scan. Empirically confirmed Gemini dominance 92% (12/13 projects). Confidence increased from HIGH to VERY HIGH. Decision filed: .squad/decisions/decisions.md.
+- Turn 3 (2026-06-02): Community AI Projects validation via GitHub landscape scan. Empirically confirmed Gemini dominance 92% (12/13 projects). Confidence increased from HIGH to VERY HIGH. Decision filed: .squad/decisions.md.
 
 **Archived (2026-06-02):** Full pre-2026-06-02 learnings (3+ turns of research) moved to `.squad/agents/librarian/history-archive.md. Current history truncated to recent work only.
 
