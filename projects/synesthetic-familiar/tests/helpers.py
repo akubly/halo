@@ -10,6 +10,8 @@ version with loop/delay params and proper start/stop lifecycle).
 """
 from __future__ import annotations
 
+from typing import Callable
+
 # FakeSensorStream: use the richer canonical version from sensors.py
 from host.sensors import FakeSensorStream  # noqa: F401 — re-exported for tests
 
@@ -30,7 +32,7 @@ class FakeTransport:
     async def send(self, data: bytes) -> None:
         self.sent.append(data)
 
-    def on_receive(self, callback) -> None:
+    def on_receive(self, callback: Callable[[bytes], None]) -> None:
         self._recv_cb = callback
 
 
