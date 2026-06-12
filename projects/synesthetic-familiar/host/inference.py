@@ -16,9 +16,12 @@ from __future__ import annotations
 import dataclasses
 import datetime
 import json
+import logging
 import math
 from pathlib import Path
 from typing import Literal
+
+logger = logging.getLogger(__name__)
 
 # Tunable thresholds — ARD §5.4 population defaults (days 1–3).
 # After day 3, baseline learning replaces STRESS_THRESHOLD with a personal value.
@@ -49,6 +52,7 @@ class MoodResult:
     intensity: float     # 0.0–1.0 continuous
     confidence: float    # 0.0–1.0
     gated: bool          # True if confidence < CONFIDENCE_GATE (main loop must not send)
+    tension: float       # Raw weighted tension score (locked contract §2.6 — B1 amendment)
 
 
 @dataclasses.dataclass
@@ -66,8 +70,25 @@ def load_baseline(path: Path = _BASELINE_PATH) -> Baseline | None:
     """Load baseline from disk. Returns None if file is missing or corrupt."""
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-        return Baseline(**data)
-    except (FileNotFoundError, json.JSONDecodeError, TypeError, KeyError):
+        b = Baseline(**data)
+        # Validate field types and values — rejects hostile/corrupt JSON that would
+        # cause a deferred crash in compute_mood (e.g. mean="EVIL", negative stddev).
+        def _is_real(v: object) -> bool:
+            return isinstance(v, (int, float)) and not isinstance(v, bool)
+        if not (
+            _is_real(b.mean) and math.isfinite(b.mean)
+            and _is_real(b.stddev) and math.isfinite(b.stddev)
+            and _is_real(b.sample_count) and b.sample_count >= 0
+        ):
+            raise ValueError(
+                f"baseline fields out of range or wrong type: "
+                f"mean={b.mean!r}, stddev={b.stddev!r}, sample_count={b.sample_count!r}"
+            )
+        return b
+    except (OSError, json.JSONDecodeError, TypeError, KeyError, ValueError) as exc:
+        logger.warning(
+            "[Baseline] failed to load from %s: %s — using population defaults", path, exc
+        )
         return None
 
 
@@ -89,7 +110,19 @@ def update_baseline(baseline: Baseline | None, tension: float) -> Baseline:
     dataclass fields are LOCKED (§2.6), so M2 is reconstructed from stored
     stddev rather than adding a new field:
         M2 = stddev² × (sample_count − 1)
+
+    Non-finite tension (NaN/inf from a corrupt audio block) is silently dropped
+    to prevent permanently poisoning the persisted mean/stddev.
     """
+    # Guard: reject NaN/inf tension to avoid corrupting the running statistics.
+    if not math.isfinite(tension):
+        return baseline if baseline is not None else Baseline(
+            mean=0.0,
+            stddev=0.0,
+            sample_count=0,
+            created_at=datetime.datetime.now().isoformat(),
+        )
+
     if baseline is None:
         return Baseline(
             mean=tension,
@@ -106,7 +139,8 @@ def update_baseline(baseline: Baseline | None, tension: float) -> Baseline:
     delta2 = tension - new_mean
     m2_new = m2_prev + delta * delta2
 
-    new_stddev = math.sqrt(m2_new / (n - 1)) if n > 1 else 0.0
+    # Variance floor clamp: FP cancellation can produce tiny negatives; sqrt(-ε) → ValueError.
+    new_stddev = math.sqrt(max(0.0, m2_new) / (n - 1)) if n > 1 else 0.0
 
     return Baseline(
         mean=new_mean,
@@ -150,6 +184,8 @@ def compute_mood(
         • both-sensors-fail fallback (ARD §5.4, 10 s)
         • intensity quantisation + jitter before encode (Gate 2)
     """
+    # audio_rms intentionally unused — ARD §5.4 tension formula excludes volume;
+    # kept for interface stability / future confidence modulation.
     # Weighted tension score (locked weights, ARD §5.4)
     tension = (
         audio_pitch_variance * 0.4
@@ -190,4 +226,5 @@ def compute_mood(
         intensity=intensity,
         confidence=confidence,
         gated=(confidence < CONFIDENCE_GATE),
+        tension=tension,
     )
