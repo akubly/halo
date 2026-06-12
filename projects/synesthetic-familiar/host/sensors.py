@@ -216,6 +216,11 @@ class SensorStream:
             self._stream.start()  # type: ignore[union-attr]
             self._mic_ok = True
         except Exception as exc:
+            if self._stream is not None:
+                try:
+                    self._stream.close()  # type: ignore[union-attr]
+                except Exception:
+                    pass
             self._stream = None
             self._mic_ok = False
             raise SensorInitError(f"Failed to open audio device: {exc}") from exc
@@ -229,8 +234,6 @@ class SensorStream:
 
     async def stop(self) -> None:
         """Close audio device and IMU relay. Idempotent."""
-        if not self._running:
-            return
         self._running = False
         self._mic_ok = False
         if self._stream is not None:
@@ -320,7 +323,13 @@ class SensorStream:
                 audio_rms = 0.0
                 audio_pitch_variance = 0.0
         finally:
-            # M2: always delete snapshot — privacy gate I7, even on exception.
+            # M2: three-layer zeroing — privacy gate I7, even on exception.
+            # Layer 1: in-buffer zero (self._buffer[:]=0.0 above, under lock).
+            # Layer 2: snapshot zero — overwrites the numpy copy in-place so the
+            #   raw samples are not merely unreferenced but actively cleared before
+            #   the allocator can reuse the memory region.
+            # Layer 3: reference release (del) — drops the last reference.
+            samples[:] = 0.0
             del samples
 
         # M2: finiteness guard — substitute 0.0 for NaN/inf from corrupt audio.

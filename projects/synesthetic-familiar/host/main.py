@@ -323,7 +323,11 @@ async def run(
         sensor_stream: Any SensorStreamPort-conforming instance (SensorStream,
                        FakeSensorStream, or test injection).
         clock:         Monotonic clock callable; injectable for test determinism.
-                       Drives timeout logic only — pacing uses time.monotonic().
+                       clock is used ONLY for timeout arithmetic (confidence-hold 30s,
+                       both-fail 10s) and must NOT be used for pacing — injectable
+                       clocks (e.g. FakeClock) advance on every call, so using clock
+                       for elapsed-time pacing would shift timeout thresholds by one
+                       tick per frame; pacing uses time.monotonic().
                        Defaults to time.monotonic.
         sleep:         Async sleep callable; injectable for test determinism.
                        Drives the unconditional 10Hz pacer in the loop finally.
@@ -333,7 +337,6 @@ async def run(
 
     # Confidence-hold state (I2)
     last_send_time: float = clock()
-    last_computed_result = None
 
     # Both-sensors-fail fallback state
     both_fail_start: float | None = None
@@ -351,7 +354,7 @@ async def run(
         try:
             async for frame in sensor_stream:
                 tick_start = clock()
-                _pace_start = time.monotonic()
+                pace_start = time.monotonic()
                 try:
                     # Both-sensors-fail fallback (10s → explicit NEUTRAL)
                     if not frame.mic_ok and not frame.imu_ok:
@@ -374,7 +377,6 @@ async def run(
                         imu_ok=frame.imu_ok,
                         baseline=baseline,
                     )
-                    last_computed_result = result
 
                     # Confidence gating + hold timeout I2
                     if result.gated:
@@ -382,6 +384,8 @@ async def run(
                             # ~30s suppressed → force-send to prevent stuck creature.
                             await _send_update(transport, seq, result)
                             last_send_time = tick_start
+                        # Intentionally skip baseline update — we don't learn from
+                        # low-confidence data.
                         continue
 
                     # Normal send path
@@ -398,8 +402,8 @@ async def run(
                     # Uses time.monotonic() so the injectable clock drives timeout logic
                     # only; FakeClock tests see no extra clock() calls per frame.
                     # sleep is injectable (default asyncio.sleep) for test determinism.
-                    _pace_elapsed = time.monotonic() - _pace_start
-                    await sleep(max(0.0, UPDATE_INTERVAL - _pace_elapsed))
+                    pace_elapsed = time.monotonic() - pace_start
+                    await sleep(max(0.0, UPDATE_INTERVAL - pace_elapsed))
 
         except (KeyboardInterrupt, asyncio.CancelledError):
             logger.info("Interrupted — stopping sensors and disconnecting")
