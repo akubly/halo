@@ -36,6 +36,10 @@
 --         Frame SDK examples use frame.sleep().  Both forms tried at startup;
 --         the working one is stored in _sleep().
 
+-- Runtime requirement: Lua 5.3+ (uses native bitwise operators for BLE seq
+-- decode and visual color math).  Confirm against live Halo firmware during
+-- hardware validation (ARD §10).
+
 -- ─── Sleep compatibility shim (GAP-4) ────────────────────────────────────────
 local _sleep
 if frame and frame.sleep then
