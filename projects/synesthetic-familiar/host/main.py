@@ -24,7 +24,7 @@ import asyncio
 import logging
 import random
 import time
-from typing import AsyncIterator, Callable, Protocol, runtime_checkable
+from typing import AsyncIterator, Awaitable, Callable, Protocol, runtime_checkable
 
 from host.familiar_protocol import (
     FamiliarAck,
@@ -312,6 +312,7 @@ async def run(
     sensor_stream: SensorStreamPort,
     *,
     clock: Callable[[], float] = time.monotonic,
+    sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
 ) -> None:
     """
     Real sensor→inference→encode→send loop at 10Hz.
@@ -324,6 +325,9 @@ async def run(
         clock:         Monotonic clock callable; injectable for test determinism.
                        Drives timeout logic only — pacing uses time.monotonic().
                        Defaults to time.monotonic.
+        sleep:         Async sleep callable; injectable for test determinism.
+                       Drives the unconditional 10Hz pacer in the loop finally.
+                       Defaults to asyncio.sleep.
     """
     seq = SequenceCounter()
 
@@ -393,8 +397,9 @@ async def run(
                     # (normal send, confidence-gated continue, both-sensors-fail continue).
                     # Uses time.monotonic() so the injectable clock drives timeout logic
                     # only; FakeClock tests see no extra clock() calls per frame.
+                    # sleep is injectable (default asyncio.sleep) for test determinism.
                     _pace_elapsed = time.monotonic() - _pace_start
-                    await asyncio.sleep(max(0.0, UPDATE_INTERVAL - _pace_elapsed))
+                    await sleep(max(0.0, UPDATE_INTERVAL - _pace_elapsed))
 
         except (KeyboardInterrupt, asyncio.CancelledError):
             logger.info("Interrupted — stopping sensors and disconnecting")

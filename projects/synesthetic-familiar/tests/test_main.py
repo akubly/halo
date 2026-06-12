@@ -249,5 +249,77 @@ class TestJitterParametrized:
         )
 
 
+# ── I5: _send_neutral_fallback uses quantise+jitter pipeline ─────────────────
+
+class TestSendNeutralFallbackPipeline(unittest.TestCase):
+    """
+    I5 — _send_neutral_fallback must route intensity through the same
+    quantise_intensity → apply_intensity_jitter pipeline as _send_update.
+
+    No special-case wire path: 0.5 → quantise → 50 → jitter → [45, 55].
+    With a seeded RNG the result is deterministic.
+    """
+
+    def setUp(self):
+        try:
+            from host.main import _send_neutral_fallback, quantise_intensity, apply_intensity_jitter
+            from host.familiar_protocol import SequenceCounter
+        except ImportError as e:
+            self.skipTest(f"Required imports unavailable: {e}")
+        self._send_neutral_fallback = _send_neutral_fallback
+        self._quantise = quantise_intensity
+        self._jitter = apply_intensity_jitter
+        self._SequenceCounter = SequenceCounter
+
+    def test_fallback_intensity_is_quantised_and_jittered(self):
+        """
+        I5 (MERGE-BLOCKING integrity): fallback packet intensity must equal
+        quantise_intensity(0.5) → 50 → apply_intensity_jitter(50, rng).
+
+        This proves _send_neutral_fallback has NO special wire path — it uses
+        the same Gate 2 pipeline as normal sends.
+        """
+        import asyncio
+        import random
+        from helpers import FakeTransport
+
+        transport = FakeTransport()
+        seq = self._SequenceCounter()
+        seed = 1234
+
+        # Pre-compute expected: same seed, same call order
+        expected_q = self._quantise(0.5)       # must be 50
+        expected_j = self._jitter(expected_q, rng=random.Random(seed))
+
+        asyncio.run(self._send_neutral_fallback(transport, seq, rng=random.Random(seed)))
+
+        assert len(transport.sent) == 1, (
+            "_send_neutral_fallback must send exactly one packet."
+        )
+        packet = transport.sent[0]
+        assert len(packet) == 6, f"FAMILIAR_UPDATE must be 6 bytes; got {len(packet)}."
+        assert packet[0] == 0x80, f"Opcode must be 0x80; got 0x{packet[0]:02x}."
+        assert packet[1] == 0, f"Mood must be NEUTRAL (0); got {packet[1]}."
+
+        intensity_byte = packet[2]
+        assert intensity_byte == expected_j, (
+            f"Fallback intensity={intensity_byte} must equal quantised+jittered={expected_j} "
+            f"(bucket 50 ±5). _send_neutral_fallback must use the Gate 2 pipeline, "
+            f"not a raw/hard-coded wire value. (I5)"
+        )
+        # Also verify it's in the expected bucket neighbourhood
+        assert abs(intensity_byte - 50) <= 5, (
+            f"Fallback intensity={intensity_byte} must be within ±5 of bucket 50. "
+            f"quantise_intensity(0.5)=50 → jitter ∈ [45, 55]."
+        )
+
+    def test_fallback_quantise_bucket_is_50(self):
+        """quantise_intensity(0.5) must map to bucket 50 (the neutral midpoint)."""
+        assert self._quantise(0.5) == 50, (
+            f"quantise_intensity(0.5) = {self._quantise(0.5)}, expected 50. "
+            "Neutral fallback uses 0.5 → bucket 50 (contract §3)."
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -50,6 +50,9 @@ except ImportError as _e:
     _PROTOCOL_IMPORT_ERROR = str(_e)
     Mood = None  # type: ignore[assignment]
 
+# M6: shared test infrastructure — single canonical source
+from helpers import FakeTransport, FakeClock, FakeSensorStream, noop_sleep
+
 
 @pytest.fixture(autouse=True)
 def _require_week2_modules() -> None:
@@ -71,78 +74,7 @@ def _require_week2_modules() -> None:
         )
 
 
-# ── Test infrastructure ───────────────────────────────────────────────────────
-
-class FakeTransport:
-    """Records every send() call. Implements the Transport Protocol seam."""
-
-    def __init__(self) -> None:
-        self.sent: list[bytes] = []
-        self._recv_cb = None
-
-    async def connect(self) -> None:
-        pass
-
-    async def disconnect(self) -> None:
-        pass
-
-    async def send(self, data: bytes) -> None:
-        self.sent.append(data)
-
-    def on_receive(self, callback) -> None:
-        self._recv_cb = callback
-
-
-class FakeClock:
-    """
-    Injectable clock that advances by a fixed step on each call.
-
-    With step=1.0, the loop's tick_start values are:
-        last_send_time = clock()  → t=0.0  (initialization)
-        frame 0: tick_start = 1.0  → delta = 1.0   (not > 30s)
-        frame n: tick_start = n+1  → delta = n+1.0
-        frame 30: tick_start = 31.0 → delta = 31.0 > 30s → SEND
-
-    The clock is stateless-ish: each __call__ returns the next value.
-    """
-
-    def __init__(self, step: float = 1.0) -> None:
-        self._t: float = 0.0
-        self._step = step
-
-    def __call__(self) -> float:
-        t = self._t
-        self._t += self._step
-        return t
-
-
-class FakeSensorStream:
-    """
-    Yields a fixed list of SensorFrame objects, then stops.
-
-    Allows the test to drive the main loop with controlled inputs.
-    """
-
-    def __init__(self, frames: list) -> None:
-        self._frames = list(frames)
-        self._idx = 0
-
-    async def start(self) -> None:
-        pass
-
-    async def stop(self) -> None:
-        pass
-
-    def __aiter__(self):
-        return self
-
-    async def __anext__(self):
-        if self._idx >= len(self._frames):
-            raise StopAsyncIteration
-        frame = self._frames[self._idx]
-        self._idx += 1
-        return frame
-
+# ── Test infrastructure (imported from helpers — M6 dedup) ────────────────────
 
 def _make_gated_frame():
     """
@@ -197,7 +129,7 @@ class TestConfidenceHoldTimeout(unittest.TestCase):
 
         async def _drive() -> None:
             try:
-                await run(transport, stream, clock=fake_clock)
+                await run(transport, stream, clock=fake_clock, sleep=noop_sleep)
             except TypeError as e:
                 pytest.fail(
                     f"host.main.run() does not accept Week-2 signature "

@@ -52,6 +52,9 @@ except ImportError as _e:
     _PROTOCOL_IMPORT_ERROR = str(_e)
     Mood = None  # type: ignore[assignment]
 
+# M6: shared test infrastructure — single canonical source
+from helpers import FakeTransport, FakeClock, FakeSensorStream, noop_sleep
+
 
 @pytest.fixture(autouse=True)
 def _require_week2_modules() -> None:
@@ -73,79 +76,7 @@ def _require_week2_modules() -> None:
         )
 
 
-# ── Test infrastructure ───────────────────────────────────────────────────────
-# (FakeTransport, FakeClock, FakeSensorStream duplicated here to keep test
-#  files independent — no shared test helpers module yet in this project.)
-
-class FakeTransport:
-    """Records every send() call. Implements the Transport Protocol seam."""
-
-    def __init__(self) -> None:
-        self.sent: list[bytes] = []
-        self._recv_cb = None
-
-    async def connect(self) -> None:
-        pass
-
-    async def disconnect(self) -> None:
-        pass
-
-    async def send(self, data: bytes) -> None:
-        self.sent.append(data)
-
-    def on_receive(self, callback) -> None:
-        self._recv_cb = callback
-
-
-class FakeClock:
-    """
-    Injectable clock that advances by a fixed step on each call.
-
-    For the both-fail path, the contract's run loop only calls clock() ONCE per
-    frame (tick_start) and does NOT call it for elapsed (early 'continue').
-
-    With step=1.0:
-        last_send_time = clock()  → t=0.0  (initialization)
-        frame 0: tick_start = 1.0, both_fail_start = 1.0 (set on first failure)
-        frame n: tick_start = n+1.0
-        delta = tick_start - both_fail_start = n+1.0 - 1.0 = n.0
-        frame 10: delta = 10.0 — NOT > 10 (equal)
-        frame 11: delta = 11.0 > 10.0 → SEND NEUTRAL
-    """
-
-    def __init__(self, step: float = 1.0) -> None:
-        self._t: float = 0.0
-        self._step = step
-
-    def __call__(self) -> float:
-        t = self._t
-        self._t += self._step
-        return t
-
-
-class FakeSensorStream:
-    """Yields a fixed list of SensorFrame objects, then stops."""
-
-    def __init__(self, frames: list) -> None:
-        self._frames = list(frames)
-        self._idx = 0
-
-    async def start(self) -> None:
-        pass
-
-    async def stop(self) -> None:
-        pass
-
-    def __aiter__(self):
-        return self
-
-    async def __anext__(self):
-        if self._idx >= len(self._frames):
-            raise StopAsyncIteration
-        frame = self._frames[self._idx]
-        self._idx += 1
-        return frame
-
+# ── Test infrastructure (imported from helpers — M6 dedup) ────────────────────
 
 def _make_both_fail_frame():
     """
@@ -217,7 +148,7 @@ class TestBothSensorsFallback(unittest.TestCase):
                     )
                 ):
                     try:
-                        await run(transport, stream, clock=fake_clock)
+                        await run(transport, stream, clock=fake_clock, sleep=noop_sleep)
                     except TypeError as e:
                         pytest.fail(
                             f"host.main.run() does not accept Week-2 signature "
@@ -232,7 +163,7 @@ class TestBothSensorsFallback(unittest.TestCase):
             except AttributeError:
                 # host.main doesn't have compute_mood yet — run without patch
                 try:
-                    await run(transport, stream, clock=fake_clock)
+                    await run(transport, stream, clock=fake_clock, sleep=noop_sleep)
                 except TypeError as e:
                     pytest.fail(
                         f"host.main.run() does not accept Week-2 signature: {e}"
