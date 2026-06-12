@@ -925,8 +925,26 @@ Please validate:
 - [ ] Bob animation (±2px sine, 0.25Hz neutral cycle)
 - [ ] 10s idle timeout → snap to neutral
 - [ ] Unsolicited ACK on connect visible on host side
+- [ ] Confirm Halo firmware Lua runtime is **≥ 5.3** (bitwise operators in packet decode and visual color math require it; ARD §10)
 
 Once confirmed, close the hardware-validation action in the ARD §10 open-questions list.
+
+---
+
+## 2026-06-11: Lua 5.3 Runtime Requirement — Da5id (Visuals)
+
+**Status:** NOTED  
+**Date:** 2026-06-11  
+**From:** Da5id (device/main.lua)  
+**Context:** Runtime requirement predates Week 2
+
+The Week-1 BLE packet decode already uses Lua 5.3+ bitwise operators (`|`, `<<`, `&`),
+so the runtime requirement predates Week 2. Week 2 adds `draw_halo_glow` and `draw_edge_fraying`,
+which use the same operators for color decomposition and the LCG hash — no new requirement introduced.
+
+A runtime-requirement comment has been added to `device/main.lua` (after the ARD §10 SDK gap flags block).
+
+**Action:** The hardware-validation checklist now includes explicit Lua ≥5.3 confirmation (checkbox added above).
 
 ---
 
