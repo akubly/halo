@@ -24,7 +24,7 @@ import asyncio
 import logging
 import random
 import time
-from typing import Callable, Protocol, runtime_checkable
+from typing import AsyncIterator, Callable, Protocol, runtime_checkable
 
 from host.familiar_protocol import (
     FamiliarAck,
@@ -37,38 +37,15 @@ from host.familiar_protocol import (
     encode_familiar_update,
 )
 from host.sensors import FakeSensorStream, SensorFrame, SensorInitError, SensorStream
-
-# ---------------------------------------------------------------------------
-# Inference imports — guarded because Librarian's implementation ships in
-# parallel.  main.py imports the locked signatures; stubs stand in until
-# the module is complete so tests of our helpers (quantise, jitter) still run.
-# ---------------------------------------------------------------------------
-try:
-    from host.inference import compute_mood, MoodResult, CONFIDENCE_GATE
-except ImportError:
-    compute_mood = None  # type: ignore[assignment]
-    MoodResult = None  # type: ignore[assignment]
-    CONFIDENCE_GATE = 0.7  # type: ignore[assignment]
-
-try:
-    from host.inference import (  # type: ignore[attr-defined]
-        Baseline,
-        load_baseline,
-        save_baseline,
-        update_baseline,
-    )
-except (ImportError, AttributeError):
-    # Librarian's baseline API not yet shipped.
-    Baseline = None  # type: ignore[assignment,misc]
-
-    def load_baseline(**_kw):  # type: ignore[misc]
-        return None
-
-    def save_baseline(*_a, **_kw) -> None:  # type: ignore[misc]
-        pass
-
-    def update_baseline(baseline, tension: float):  # type: ignore[misc]
-        return baseline
+from host.inference import (
+    Baseline,
+    CONFIDENCE_GATE,
+    MoodResult,
+    compute_mood,
+    load_baseline,
+    save_baseline,
+    update_baseline,
+)
 
 
 logger = logging.getLogger("familiar.host")
@@ -103,6 +80,16 @@ class Transport(Protocol):
     async def disconnect(self) -> None: ...
     async def send(self, data: bytes) -> None: ...
     def on_receive(self, callback: Callable[[bytes], None]) -> None: ...
+
+
+@runtime_checkable
+class SensorStreamPort(Protocol):
+    """Duck-typed async sensor stream seam — SensorStream and FakeSensorStream both conform."""
+
+    async def start(self) -> None: ...
+    async def stop(self) -> None: ...
+    def __aiter__(self) -> AsyncIterator[SensorFrame]: ...
+    async def __anext__(self) -> SensorFrame: ...
 
 
 class MockTransport:
@@ -268,7 +255,7 @@ def _make_device_msg_handler() -> Callable[[bytes], None]:
 async def _send_update(
     transport: Transport,
     seq: SequenceCounter,
-    result,  # MoodResult
+    result: MoodResult,
 ) -> None:
     """Quantise → jitter → encode → send a mood update."""
     q_intensity = quantise_intensity(result.intensity)
@@ -293,11 +280,19 @@ async def _send_update(
 async def _send_neutral_fallback(
     transport: Transport,
     seq: SequenceCounter,
+    rng: random.Random | None = None,
 ) -> None:
-    """Both-sensors-fail fallback: send explicit NEUTRAL (ARD §5.4)."""
+    """Both-sensors-fail fallback: send explicit NEUTRAL (ARD §5.4).
+
+    Routes intensity through quantise_intensity → apply_intensity_jitter so the
+    Gate 2 pipeline is always exercised (no special-case wire path).
+    RNG is injectable for test determinism.
+    """
+    q_intensity = quantise_intensity(0.5)       # 0.5 → bucket 50
+    j_intensity = apply_intensity_jitter(q_intensity, rng=rng)
     packet = encode_familiar_update(
         mood=Mood.NEUTRAL,
-        intensity=50,
+        intensity=j_intensity,
         confidence=50,
         seq=seq.next(),
     )
@@ -314,7 +309,7 @@ async def _send_neutral_fallback(
 
 async def run(
     transport: Transport,
-    sensor_stream: SensorStream,
+    sensor_stream: SensorStreamPort,
     *,
     clock: Callable[[], float] = time.monotonic,
 ) -> None:
@@ -324,17 +319,12 @@ async def run(
     Args:
         transport:     Any Transport-conforming instance (MockTransport,
                        BrilliantBleTransport, or Juanita's FakeTransport).
-        sensor_stream: Any SensorStream-conforming instance (SensorStream,
+        sensor_stream: Any SensorStreamPort-conforming instance (SensorStream,
                        FakeSensorStream, or test injection).
         clock:         Monotonic clock callable; injectable for test determinism.
+                       Drives timeout logic only — pacing uses time.monotonic().
                        Defaults to time.monotonic.
     """
-    if compute_mood is None:
-        raise RuntimeError(
-            "host.inference.compute_mood not available — "
-            "Librarian's inference.py has not been implemented yet."
-        )
-
     seq = SequenceCounter()
 
     # Confidence-hold state (I2)
@@ -349,58 +339,65 @@ async def run(
 
     transport.on_receive(_make_device_msg_handler())
     await transport.connect()
-
-    await sensor_stream.start()
-    logger.info("Real sensor loop started at %.0fHz", UPDATE_HZ)
-
+    # I3: transport.disconnect() is guaranteed by the outer finally even if
+    # sensor_stream.start() raises (SensorInitError, sounddevice missing, etc.).
     try:
-        async for frame in sensor_stream:
-            tick_start = clock()
+        await sensor_stream.start()
+        logger.info("Real sensor loop started at %.0fHz", UPDATE_HZ)
+        try:
+            async for frame in sensor_stream:
+                tick_start = clock()
+                _pace_start = time.monotonic()
+                try:
+                    # Both-sensors-fail fallback (10s → explicit NEUTRAL)
+                    if not frame.mic_ok and not frame.imu_ok:
+                        if both_fail_start is None:
+                            both_fail_start = tick_start
+                        elif (tick_start - both_fail_start) > BOTH_FAIL_TIMEOUT_S:
+                            await _send_neutral_fallback(transport, seq)
+                            last_send_time = tick_start
+                            both_fail_start = tick_start  # Re-arm
+                        continue
+                    both_fail_start = None  # Reset on any good sensor frame
 
-            # Both-sensors-fail fallback (10s → explicit NEUTRAL)
-            if not frame.mic_ok and not frame.imu_ok:
-                if both_fail_start is None:
-                    both_fail_start = tick_start
-                elif (tick_start - both_fail_start) > BOTH_FAIL_TIMEOUT_S:
-                    await _send_neutral_fallback(transport, seq)
-                    last_send_time = tick_start
-                    both_fail_start = tick_start  # Re-arm
-                continue
-            both_fail_start = None  # Reset on any good sensor frame
+                    # Inference
+                    result = compute_mood(
+                        audio_rms=frame.audio_rms,
+                        audio_pitch_variance=frame.audio_pitch_variance,
+                        imu_acceleration=frame.imu_acceleration,
+                        imu_rotation=frame.imu_rotation,
+                        mic_ok=frame.mic_ok,
+                        imu_ok=frame.imu_ok,
+                        baseline=baseline,
+                    )
+                    last_computed_result = result
 
-            # Inference
-            result = compute_mood(
-                audio_rms=frame.audio_rms,
-                audio_pitch_variance=frame.audio_pitch_variance,
-                imu_acceleration=frame.imu_acceleration,
-                imu_rotation=frame.imu_rotation,
-                mic_ok=frame.mic_ok,
-                imu_ok=frame.imu_ok,
-                baseline=baseline,
-            )
-            last_computed_result = result
+                    # Confidence gating + hold timeout I2
+                    if result.gated:
+                        if (tick_start - last_send_time) > CONFIDENCE_HOLD_TIMEOUT_S:
+                            # ~30s suppressed → force-send to prevent stuck creature.
+                            await _send_update(transport, seq, result)
+                            last_send_time = tick_start
+                        continue
 
-            # Confidence gating + hold timeout I2
-            if result.gated:
-                if (tick_start - last_send_time) > CONFIDENCE_HOLD_TIMEOUT_S:
-                    # ~30s suppressed → force-send last result to prevent stuck creature.
+                    # Normal send path
                     await _send_update(transport, seq, result)
                     last_send_time = tick_start
-                continue
 
-            # Normal send path
-            await _send_update(transport, seq, result)
-            last_send_time = tick_start
+                    # Baseline update — only on successfully sent frames.
+                    # B1: use raw tension (not mood-transformed intensity).
+                    baseline = update_baseline(baseline, result.tension)
 
-            # Baseline update — only on successfully sent frames.
-            baseline = update_baseline(baseline, result.intensity)
+                finally:
+                    # B2: sole rate-limiter — unconditional pacer covers every path
+                    # (normal send, confidence-gated continue, both-sensors-fail continue).
+                    # Uses time.monotonic() so the injectable clock drives timeout logic
+                    # only; FakeClock tests see no extra clock() calls per frame.
+                    _pace_elapsed = time.monotonic() - _pace_start
+                    await asyncio.sleep(max(0.0, UPDATE_INTERVAL - _pace_elapsed))
 
-            # Rate-limit to 10Hz
-            elapsed = clock() - tick_start
-            await asyncio.sleep(max(0.0, UPDATE_INTERVAL - elapsed))
-
-    except (KeyboardInterrupt, asyncio.CancelledError):
-        logger.info("Interrupted — stopping sensors and disconnecting")
+        except (KeyboardInterrupt, asyncio.CancelledError):
+            logger.info("Interrupted — stopping sensors and disconnecting")
     finally:
         await sensor_stream.stop()
         if baseline is not None:

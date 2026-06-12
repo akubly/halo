@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import logging
+import math
 import threading
 from typing import AsyncIterator, Sequence
 
@@ -251,14 +252,14 @@ class SensorStream:
 
     async def __anext__(self) -> SensorFrame:
         """
-        Yield next SensorFrame; rate-limits to ~10Hz.
+        Yield next SensorFrame.
+
+        Rate-pacing removed (B2): the main loop is the sole pacer at 10Hz.
+        SensorStream is capture-driven by the audio device callback cadence.
 
         Raises:
             StopAsyncIteration: when stream is stopped.
         """
-        if not self._running:
-            raise StopAsyncIteration
-        await asyncio.sleep(1.0 / 10.0)
         if not self._running:
             raise StopAsyncIteration
         return self._extract_frame()
@@ -307,17 +308,26 @@ class SensorStream:
             # Zero immediately — privacy gate I7.
             self._buffer[:] = 0.0
             self._buffer_pos = 0
+            # M1: read _mic_ok under lock — written by the sounddevice callback
+            # thread; holding the lock here is zero extra cost.
+            mic_ok = self._mic_ok
 
-        mic_ok = self._mic_ok
-        if mic_ok:
-            audio_rms = _compute_rms(samples)
-            audio_pitch_variance = _compute_pitch_variance(samples)
-        else:
+        try:
+            if mic_ok:
+                audio_rms = _compute_rms(samples)
+                audio_pitch_variance = _compute_pitch_variance(samples)
+            else:
+                audio_rms = 0.0
+                audio_pitch_variance = 0.0
+        finally:
+            # M2: always delete snapshot — privacy gate I7, even on exception.
+            del samples
+
+        # M2: finiteness guard — substitute 0.0 for NaN/inf from corrupt audio.
+        if not math.isfinite(audio_rms):
             audio_rms = 0.0
+        if not math.isfinite(audio_pitch_variance):
             audio_pitch_variance = 0.0
-
-        # Explicitly delete snapshot — belt-and-suspenders privacy gate I7.
-        del samples
 
         return SensorFrame(
             audio_rms=audio_rms,
