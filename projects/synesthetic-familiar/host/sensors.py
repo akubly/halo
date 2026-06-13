@@ -215,8 +215,9 @@ class SensorStream:
                 callback=self._audio_callback,
                 blocksize=block_size,
             )
+            with self._audio_lock:
+                self._mic_ok = True
             self._stream.start()  # type: ignore[union-attr]
-            self._mic_ok = True
         except Exception as exc:
             if self._stream is not None:
                 try:
@@ -237,7 +238,6 @@ class SensorStream:
     async def stop(self) -> None:
         """Close audio device and IMU relay. Idempotent."""
         self._running = False
-        self._mic_ok = False
         if self._stream is not None:
             try:
                 self._stream.stop()   # type: ignore[union-attr]
@@ -249,8 +249,9 @@ class SensorStream:
                 pass
             self._stream = None
         await self._imu.stop()
-        # Zero the buffer on stop — privacy gate I7.
+        # Zero the buffer on stop — privacy gate I7. Also clear mic flag under lock.
         with self._audio_lock:
+            self._mic_ok = False
             self._buffer[:] = 0.0
             self._buffer_pos = 0
         logger.info("[SensorStream] stopped")
