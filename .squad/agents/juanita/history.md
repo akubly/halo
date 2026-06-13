@@ -173,3 +173,6 @@ Extracted into `tests/helpers.py` as the single canonical source.
 `conftest.py` adds `tests/` to `sys.path` so `from helpers import ...` resolves in test files.
 Both `test_confidence_gating.py` and `test_fallback.py` now import from `helpers` — local class
 definitions removed. `noop_sleep` added to `helpers.py` as a no-op async sleep for injection.
+
+## Learnings
+- A docstring-only `async def` is valid Python but reads as a possibly-omitted body; add an explicit `pass` after the docstring for clarity (cycle-3 readability nit, 2026-06-12).

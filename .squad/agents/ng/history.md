@@ -126,14 +126,5 @@ keeps `clock()` at exactly one call per frame for timeout logic, preserving
 `FakeClock` invariants. Trade-off: tests are ~5–6s slower (0.1s sleep × N gated/fail
 frames) but stay green.
 
-**I4 — Remove import-fallback stubs; direct imports fail fast (IMPORTANT)**
+- **cycle-3 review:** IMU normals (`_IMU_ACCEL_NORM`, `_IMU_ROT_NORM`) were declared but never applied — always audit normalisation constants against the code path that uses them, not just their definition. stop/close in a single try block defeats hardened-shutdown intent; use separate guards. Writing a flag outside the lock it's read under gives no real synchronisation — both sides must hold the same lock.
 
-The `try/except (ImportError, AttributeError)` blocks defining no-op
-`load_baseline`/`save_baseline`/`update_baseline` stubs masked contract drift: if
-Librarian renamed or removed a symbol, main.py would silently use the no-op stubs and
-persist nothing. Now that `host.inference` exists and is stable, direct imports make
-startup fail loudly with a clear `ImportError` on any API change. Lesson: guarded
-imports are a useful scaffold during parallel development but must be removed once the
-dependency ships — they become a liability.
-
----

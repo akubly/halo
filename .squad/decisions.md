@@ -1110,3 +1110,29 @@ p.zeros(sample_rate)\ at sensors.py:182
 - P2-1: LESC (BLE encryption, Phase 2)
 - P2-2: Baseline plaintext hardening (Librarian, Phase 2)
 
+---
+
+## 2026-06-12: Week-3 Follow-up — Baseline Activation Cadence (Population→Personal Threshold Gate)
+
+**By:** Librarian (via cycle-3 persona review; Architect finding)  
+**Date:** 2026-06-12  
+**Severity:** important  
+**Disposition:** deferred to Week 3  
+**Status:** OPEN
+
+### What
+
+Add explicit activation criteria (minimum `sample_count` threshold and/or ≥3-day age window) before `compute_mood()` in `host/inference.py` switches from population defaults to the personal mean+1.5σ threshold.
+
+### Why
+
+ARD §5.4 specifies: "first 3 days population defaults, after day 3 personal mean+1.5σ". Currently, the personal stress threshold engages as soon as a baseline file exists (i.e., `baseline is not None`), with no explicit gate on sample count or age window. This collapses the intended population-default warmup period.
+
+**Non-blocking for Week 2:** Baseline learning is Phase-1 simplified, and the threshold difference is negligible early on.
+
+**Relevant to Week 3:** Onboarding calibration and threshold tuning should formalize the activation gate per ARD §5.4.
+
+### Owner
+
+Librarian, Week 3.
+
