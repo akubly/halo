@@ -594,3 +594,58 @@ class TestPrivacyProtocol:
             "Extra bytes indicate an undocumented field — privacy review required."
         )
 
+    def test_familiar_update_carries_no_raw_biometric_values(self) -> None:
+        """
+        Gate 1 (MERGE-BLOCKING) — contract §3, hiro-week2-integration-contract.md.
+
+        encode_familiar_update() must accept EXACTLY:
+            mood, intensity, confidence, seq
+
+        It must NOT accept any of:
+            audio_rms, pitch_variance, audio_pitch_variance,
+            imu_accel, imu_acceleration, imu_rot, imu_rotation
+
+        The encode function is the FINAL gate before data hits the wire.
+        If it accepted raw sensor parameters, a caller could inadvertently
+        route biometric data to the Halo device — a privacy violation.
+
+        Test method: inspect.signature() — does not require calling the function.
+        """
+        sig = inspect.signature(encode_familiar_update)
+        params = set(sig.parameters.keys())
+
+        # ── Required params — must all be present ────────────────────────────
+        required = {"mood", "intensity", "confidence", "seq"}
+        missing_required = required - params
+        assert not missing_required, (
+            f"encode_familiar_update is missing required params: {missing_required}. "
+            f"Contract §3 requires exactly: {required}"
+        )
+
+        # ── Forbidden raw biometric params — must be absent ──────────────────
+        forbidden = {
+            "audio_rms",
+            "pitch_variance",
+            "audio_pitch_variance",
+            "imu_accel",
+            "imu_acceleration",
+            "imu_rot",
+            "imu_rotation",
+        }
+        leaked = forbidden & params
+        assert not leaked, (
+            f"encode_familiar_update MUST NOT accept raw biometric parameters; "
+            f"found forbidden params: {leaked}. "
+            f"Gate 1 violation: raw sensor values must never reach the wire. "
+            f"Pipeline: compute_mood() → MoodResult → main loop → encode_familiar_update(). "
+            f"(hiro-week2-integration-contract.md §3)"
+        )
+
+        # ── No extra undocumented params beyond the required set ─────────────
+        undocumented = params - required
+        assert not undocumented, (
+            f"encode_familiar_update has undocumented parameters: {undocumented}. "
+            f"The function signature is closed (contract §3). "
+            f"Any extra parameter requires an ARD amendment and security review."
+        )
+

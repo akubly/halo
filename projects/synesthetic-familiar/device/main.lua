@@ -36,6 +36,10 @@
 --         Frame SDK examples use frame.sleep().  Both forms tried at startup;
 --         the working one is stored in _sleep().
 
+-- Runtime requirement: Lua 5.3+ (uses native bitwise operators for BLE seq
+-- decode and visual color math).  Confirm against live Halo firmware during
+-- hardware validation (ARD §10).
+
 -- ─── Sleep compatibility shim (GAP-4) ────────────────────────────────────────
 local _sleep
 if frame and frame.sleep then
@@ -55,6 +59,15 @@ local RENDER_HZ    = 20         -- target render rate (ARD §5.5: 15–30fps)
 local RENDER_DT    = 1.0 / RENDER_HZ
 local TIMEOUT_S    = 10.0       -- no update for 10s → neutral (ARD §5.1)
 local ACK_INTERVAL = 10         -- send FAMILIAR_ACK every N accepted packets
+
+-- ─── Week 2 Visual Enhancements (ARD §5.5) ────────────────────────────────────
+-- CALM halo glow: 3 concentric rings (radii in pixels from sprite center)
+local HALO_RADII = { 14, 17, 20 }       -- inner → outer
+local HALO_BRIGHTNESS = { 0.6, 0.35, 0.15 }  -- decreasing brightness
+
+-- STRESSED edge fraying: noise amplitude and sampling rate
+local FRAY_AMP_PX = 2                   -- max displacement from edge
+local FRAY_SEGMENTS = 16                -- sample points around perimeter
 
 -- ─── Sprite position (Da5id spec, sprites/README.md) ─────────────────────────
 -- 7 o'clock on rim, 80% radius.  Sprite center = (40, 179); 24×24 top-left = (28, 167).
@@ -152,6 +165,7 @@ local state = {
   last_rx_t   = 0,        -- time of last accepted packet (for timeout)
   bob_phase   = 0.0,      -- radians; advances each frame
   render_int  = 50.0,     -- smoothed intensity for rendering (lerp target)
+  fray_seed   = 0,        -- Week 2: pseudo-random seed for stressed edge fraying
 }
 
 -- ─── BLE wire-format decode (ARD §5.2) ────────────────────────────────────────
@@ -216,6 +230,93 @@ local function clamp(v, lo, hi)
   if v < lo then return lo end
   if v > hi then return hi end
   return v
+end
+
+-- ─── Week 2: CALM Halo Glow (ARD §5.5) ────────────────────────────────────────
+-- Draws 3 concentric rings around the sprite with decreasing brightness.
+-- SDK gap: circle() not confirmed — uses set_pixel() Bresenham fallback.
+-- Each ring: ~2πr pixels; 3 rings totaling ~230 lit pixels at r=14,17,20.
+-- Lit-pixel budget impact: ~3.8% canvas (230 / 6144) — well under 30% cap.
+local function draw_halo_glow(cx, cy, mood_idx, intensity_norm)
+  if mood_idx ~= 1 then return end  -- only for CALM state
+  
+  local pal = PALETTE[1]
+  local base_color = pal[2]  -- body mid teal as halo base
+  
+  -- Intensity modulates halo opacity (0.0–1.0 → 0%–100% of brightness)
+  local int_scale = clamp(intensity_norm, 0.0, 1.0)
+  
+  for ring = 1, #HALO_RADII do
+    local r = HALO_RADII[ring]
+    local brightness = HALO_BRIGHTNESS[ring] * int_scale
+    if brightness >= 0.05 then  -- skip invisible rings
+      -- Dim the base color by brightness factor (0xRRGGBB decomposition)
+      local rr = math.floor(((base_color >> 16) & 0xFF) * brightness)
+      local gg = math.floor(((base_color >> 8) & 0xFF) * brightness)
+      local bb = math.floor((base_color & 0xFF) * brightness)
+      local ring_color = (rr << 16) | (gg << 8) | bb
+      
+      -- Bresenham circle (set_pixel fallback for SDK gap)
+      -- Mid-point circle algorithm: only compute 1/8 arc, mirror to 8 octants
+      local x, y, d = r, 0, 1 - r
+      while x >= y do
+        -- 8-way symmetry
+        frame.display.set_pixel(cx + x, cy + y, ring_color)
+        frame.display.set_pixel(cx - x, cy + y, ring_color)
+        frame.display.set_pixel(cx + x, cy - y, ring_color)
+        frame.display.set_pixel(cx - x, cy - y, ring_color)
+        frame.display.set_pixel(cx + y, cy + x, ring_color)
+        frame.display.set_pixel(cx - y, cy + x, ring_color)
+        frame.display.set_pixel(cx + y, cy - x, ring_color)
+        frame.display.set_pixel(cx - y, cy - x, ring_color)
+        
+        y = y + 1
+        if d < 0 then
+          d = d + 2 * y + 1
+        else
+          x = x - 1
+          d = d + 2 * (y - x) + 1
+        end
+      end
+    end
+  end
+end
+
+-- ─── Week 2: STRESSED Edge Fraying (ARD §5.5) ─────────────────────────────────
+-- Adds border noise via scattered pixels around sprite perimeter.
+-- Anti-robotic jitter: uses frame-varying seed (5–10% visual variance).
+-- Lit-pixel budget impact: ~16 pixels max (FRAY_SEGMENTS) = 0.3% canvas.
+local function draw_edge_fraying(cx, cy, mood_idx, intensity_norm, fray_seed)
+  if mood_idx ~= 2 then return end  -- only for STRESSED state
+  
+  local pal = PALETTE[2]
+  local fray_color = pal[3]  -- bright amber for frayed edges
+  
+  -- Intensity modulates fray amplitude (more stress = more fraying)
+  local int_scale = clamp(intensity_norm, 0.0, 1.0)
+  local amp = math.floor(FRAY_AMP_PX * int_scale + 0.5)
+  if amp < 1 then return end  -- no visible fraying at low intensity
+  
+  -- Sprite approximate radius (from center to edge of 24×24)
+  local sprite_r = 11
+  
+  -- Scatter pixels around the perimeter with pseudo-random displacement
+  local seed = fray_seed
+  for i = 0, FRAY_SEGMENTS - 1 do
+    local angle = (i / FRAY_SEGMENTS) * 2 * math.pi
+    
+    -- Simple LCG for deterministic per-frame jitter (period = 2^16)
+    seed = (seed * 1103515245 + 12345) & 0xFFFF
+    local noise = ((seed % (2 * amp + 1)) - amp)  -- range: [-amp, +amp]
+    
+    local r_disp = sprite_r + noise
+    local px = cx + math.floor(r_disp * math.cos(angle) + 0.5)
+    local py = cy + math.floor(r_disp * math.sin(angle) + 0.5)
+    
+    frame.display.set_pixel(px, py, fray_color)
+  end
+  
+  return seed  -- return updated seed for next frame continuity
 end
 
 -- Draw the 24×24 creature sprite centered at (cx, cy + bob_y).
@@ -309,12 +410,22 @@ while true do
     -- Smooth intensity toward target (200ms lerp, ARD §5.1)
     local lerp_t = clamp(dt / 0.2, 0.0, 1.0)
     state.render_int = state.render_int + (state.intensity - state.render_int) * lerp_t
+    
+    -- Normalized intensity for visual effects (0.0–1.0)
+    local intensity_norm = state.render_int / 100.0
 
     -- Clear frame (OLED: fill with black = zero power)
     frame.display.clear()
+    
+    -- Week 2: Draw halo glow BEHIND creature (CALM state only)
+    draw_halo_glow(SPRITE_CX, SPRITE_CY + bob_y, state.mood, intensity_norm)
 
     -- Draw creature at bobbed position
     draw_creature(SPRITE_CX, SPRITE_CY + bob_y, state.mood)
+    
+    -- Week 2: Draw edge fraying ON TOP of creature (STRESSED state only)
+    -- Advance fray_seed each frame for temporal jitter (5-10% anti-robotic variance)
+    state.fray_seed = draw_edge_fraying(SPRITE_CX, SPRITE_CY + bob_y, state.mood, intensity_norm, state.fray_seed) or state.fray_seed
 
     -- Flush display buffer to screen
     frame.display.show()
