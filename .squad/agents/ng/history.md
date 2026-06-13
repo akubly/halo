@@ -21,61 +21,41 @@
 
 ---
 
-## Current Status: Week 1 COMPLETE
-
-**Branch:** week1-synesthetic-familiar  
-**Final Commit:** e9c8455 (Copilot PR review fixes)  
-**Test Results:** 59 passed, 5 xfailed, 0 failed  
-**Outcome:** host-side verified (59 passed / 5 xfailed); device render loop NOT yet hardware-validated — on-device bob/render unconfirmed (Week-2 action)
-
-### Canonical Exports (Locked by Test Contract)
-- `Mood` IntEnum: NEUTRAL=0, CALM=1, STRESSED=2, ATTENTION=3
-- `seq_is_newer(received, last_accepted) → bool` (signed-16 delta dedup)
-- `decode_familiar_update()`, `decode_familiar_ack()`, `decode_familiar_reset()` wire format per ARD §5.2
-
----
-
-## Week-2 Follow-ups
-
-1. **Cross-language wire-format conformance** — Promote golden vectors to language-neutral fixture
-2. **Sequence-reset hardening** — Post-timeout accept only seq==0 for first packet
-3. **Decoder-contract symmetry** — `decode_familiar_ack` return type refactor (test coordination with Juanita)
-4. **[Aaron ACTION] Hardware validation** — Real device test of BLE, sprite render, bob, timeout, ACK
-
----
-
-### Week 3 SDK Gate Resolution & Implementation (2026-06-12 to 2026-06-13)
+## Week 3 "It's alive" — Gate Resolution & Implementation (2026-06-13)
 
 **Gate 1: IMU Interrupt** ✅ GO  
-- ARD API name was incorrect (`frame.imu.on_tap` → actual is `frame.imu.tap_callback`)
-- Double-tap discrimination via Lua debounce (350ms window, 40ms hardware debounce)
-- Opcode 0x01 (FAMILIAR_RESET) wired: snaps device state to NEUTRAL, sends byte
+- ARD API name incorrect in docs (`frame.imu.on_tap` → real is `frame.imu.tap_callback`)
+- Double-tap discrimination via Lua debounce (350ms window)
+- Opcode 0x01 (FAMILIAR_RESET): snaps device to NEUTRAL locally
 
 **Gate 2: Heap API** ❌ NO-GO → Fallback as v1  
-- `frame.system.get_heap_usage()` does not exist in current Halo Lua stdlib
-- Manual proxy: sprite rows (24×25 bytes) + BLE MTU (244 bytes) → fraction of 40KB budget
-- Thresholds: 80% = reduce glow, 95% = graceful halt
-- TODO: hardware-swap hook when firmware provides real API
+- No `frame.system.get_heap_usage()` in current SDK
+- Manual proxy: sprite + BLE buffer fraction of 40KB budget
+- Thresholds: 80% reduce glow, 95% graceful halt
 
-**Device Implementation** (main.lua):
-- Double-tap FAMILIAR_RESET (opcode 0x01) + local state snap to NEUTRAL
-- ATTENTION-on-IMU-peak: IMU.raw() polled at 20fps, magnitude threshold 1.8g, 500ms overlay
-- State machine fidelity: ATTENTION restores pre-attention mood (not NEUTRAL)
-- Halo glow simplified: `frame.display.circle()` replaces Bresenham 8-call loop (8× reduction)
+**Device Implementation:**
+- Double-tap FAMILIAR_RESET + state snap to NEUTRAL
+- ATTENTION-on-IMU-peak (20fps poll, 1.8g threshold, 500ms overlay)
+- Halo glow simplified: `frame.display.circle()` replaces Bresenham (8× call reduction)
+- State fidelity: ATTENTION restores pre-attention mood
 
-**Test Status:** 128/128 baseline maintained
+**Test Status:** 128/128 baseline maintained (no regressions)
 
-**Flags to team:**
-- Raven: New accelerometer read path (on-device only, no new BLE characteristic)
-- Lagos: No new SDK deps (all APIs already in Halo stdlib)
-- Da5id: Three tunables marked for calibration (IMU_PEAK_THRESH_G, ATTENTION_DURATION_S, IMU_SCALE)
 
-## Session Timeline (continued)
+---
+
+## Session Timeline
 
 | Date | Session | Key Output |
 |------|---------|-----------|
-| 2026-06-10 | Week 2 Sensors + Main Loop | `host/sensors.py` + `host/main.py` real loop shipped; 59 passed, 5 xfailed |
-| 2026-06-13 | Week 3 Device Implementation | double-tap FAMILIAR_RESET, ATTENTION-on-IMU-peak, heap proxy, circle() glow; 128 tests pass |
+| 2026-06-01 | SDK Lineage Audit | 8 breaking changes documented; archived |
+| 2026-06-02–06-03 | Community SDK + Ideation + User Stories | 9 projects, 8 patterns, 10 stories; 4 SDK gaps |
+| 2026-06-08 | VESPER BLE Wire-Format | LE endianness, seq wraparound, opcode split locked |
+| 2026-06-09 | Week 1 Implementation | familiar_protocol.py + host/main.py + device/main.lua; 54 tests |
+| 2026-06-10 | Week 2 Sensors + Main Loop | sensors.py + main.py real loop; 59 passed, 5 xfailed |
+| 2026-06-13 | Week 3 Device Implementation | double-tap FAMILIAR_RESET, ATTENTION-on-IMU-peak, heap proxy; 128 tests |
+
+Full pre-Week-3 session history archived in `.squad/agents/ng/history-archive.md`.
 
 ---
 

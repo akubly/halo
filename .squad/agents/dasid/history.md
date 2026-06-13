@@ -111,3 +111,68 @@ Pitched design-lens codename candidates for the Synesthetic Familiar. Team conve
 - [ ] Confirm Bresenham circle visual quality on actual OLED (aliasing, brightness consistency)
 - [ ] Measure frame time with halo rendering (~230 additional set_pixel calls) — expect <5ms overhead
 - [ ] Verify edge fraying LCG produces visually pleasing noise (not too patterned, not too chaotic)
+
+---
+
+## Session 2026-06-12: VESPER Week 3 — ATTENTION Jump Animation Spec
+
+**Delivered:** Motion spec for the ATTENTION jump animation triggered by IMU peak.
+
+### Motion Design
+- **Single upward burst:** +4px (double the ±2px bob amplitude) — reads as "startled" acknowledgment
+- **Asymmetric timing:** 60ms launch (ease-out-quad) + 120ms settle (ease-in-out-quad) = 180ms total
+- **Additive motion:** Jump offset adds to bob, doesn't replace it — seamless re-integration after 180ms
+- **500ms cooldown:** Prevents spam on rapid head shakes
+
+### Visual State (ATTENTION palette, state [3])
+- Eye goes **pure white (0xFFFFFF)** — maximum contrast, "I see you" read
+- Body **desaturates to neutral gray** — distinguishes from STRESSED (amber) and CALM (teal)
+- No halo, no fraying — transient moment, too short for ambient effects
+
+### Glance-Ergonomics Verification
+ATTENTION vs STRESSED cannot collide because:
+1. **Duration:** ATTENTION = 180ms burst; STRESSED = sustained seconds–minutes
+2. **Color:** ATTENTION = gray body + white eye; STRESSED = amber body + amber eye
+3. **Motion:** ATTENTION = single asymmetric jump; STRESSED = continuous fast bob
+4. **Edge:** ATTENTION = clean silhouette; STRESSED = frayed edge
+
+### Flags for Aaron
+1. **Eye dilation deferred:** Recommended shipping without +1px eye dilation for Week 3; pure white should suffice
+2. **Mood restoration:** Recommended tracking `state.mood_before_attention` to avoid flicker when returning from attention
+
+### Learnings
+1. **Additive animation is key:** The jump mustn't reset the bob phase — that would look like a glitch. Adding jump offset to bob offset preserves continuity.
+2. **Asymmetric timing sells "life":** Symmetric 90ms up / 90ms down would feel robotic. Fast launch + slow settle mimics the physics of a startled creature.
+3. **Desaturation distinguishes moment from mood:** Grayscale during ATTENTION creates a "freeze frame" effect that's visually distinct from any mood state.
+4. **Cooldown matters for micro-interactions:** Without the 500ms gate, nodding would spam attention jumps and break the illusion.
+
+### Deliverable
+`.squad/decisions/inbox/dasid-week3-attention-animation.md` — complete spec with Lua constants, ASCII keyframes, and Ng checklist.
+
+---
+
+## Week 3 Wave 1 Complete — 2026-06-13
+
+**ATTENTION Animation spec shipped and merged to decisions.md.**
+
+**Key spec details:**
+- **Motion:** 180ms upward burst (60ms fast launch + 120ms soft settle), +4px amplitude, additive to bob
+- **Visual:** White eye + desaturated gray body (palette [3])
+- **Integration:** Adds to bob offset (`render_y = base_y + bob + attention_offset`), no phase reset
+- **Trigger:** IMU.raw() polled at 20fps, magnitude > 1.8g threshold
+- **Cooldown:** 500ms anti-spam
+- **Glance fidelity:** Motion + color + duration distinguish from STRESSED (sustained, amber, fraying)
+
+**Tunables for Ng's calibration pass:**
+- `ATTENTION_JUMP_AMP_PX = 4`
+- `ATTENTION_LAUNCH_MS = 60`
+- `ATTENTION_SETTLE_MS = 120`
+- `ATTENTION_DURATION_MS = 180`
+- `ATTENTION_COOLDOWN_MS = 500`
+
+**Flags for Aaron (deferred as Week 3 polish):**
+1. Eye dilation (+1px): Recommend ship without; pure white should suffice
+2. Mood restoration: Recommend track `state.mood_before_attention` to avoid flicker
+
+**Decision file:** `.squad/decisions.md` (merged from `.squad/decisions/inbox/dasid-week3-attention-animation.md`)
+

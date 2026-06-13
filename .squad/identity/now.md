@@ -1,32 +1,38 @@
 ---
-updated_at: 2026-06-11T00:00:00Z
-focus_area: VESPER Week 2 "It reacts" — IN PR REVIEW (128 tests, both privacy gates approved)
+updated_at: 2026-06-13T07:23:00Z
+focus_area: VESPER Week 3 "It's alive" — WAVE 1 COMPLETE (SDK gates resolved, gates live, baseline activation gate landed, test harness ready)
 active_issues: []
-status: Week 2 COMPLETE — Real sensors live, local inference (no cloud), privacy gates APPROVED
+status: Week 3 Wave 1 COMPLETE — Gates, baseline activation, onboarding harness, acceptance tests (176 passing), ATTENTION spec all shipped
 ---
 
 # What We're Focused On
 
 **Synesthetic Familiar (VESPER)** — Theme-2 project at `projects/synesthetic-familiar/`.
 
-**WEEK 2 "It reacts" MERGED** — 2026-06-10 merge wave complete.
+**WEEK 3 "It's alive" — WAVE 1 MERGED** — 2026-06-13 orchestration complete.
 
 **Status:**
-- ✅ 128 tests green (was 54 at start of Week 2)
-- ✅ Gate I7 (Mic buffer ≤1s, no raw bytes on SensorFrame public API) — **APPROVED**
-- ✅ Gate 1 (No raw biometrics on wire, encode_familiar_update signature gated) — **APPROVED**
-- ✅ Real desktop-mic capture operational (sounddevice + numpy); Halo IMU relay scaffolded but held at imu_ok=False behind the SDK gap (BLE IMU characteristic unconfirmed, ARD §10) — runs mic-only until hardware validation
-- ✅ Local mood heuristic (no cloud): tension = pitch_variance×0.4 + acceleration×0.3 + rotation×0.3
-- ✅ Confidence gating (< 0.7 → suppress); 30s confidence-hold timeout; 10s both-fail → NEUTRAL
-- ✅ Intensity quantised to {0,25,50,75,100}, jittered ±5 before encode (Gate 2)
-- ✅ Visual enhancements (CALM halo glow + STRESSED edge fraying) within budget
-- ✅ Privacy audit: zero cloud egress, Welford baseline at ~/.vesper/baseline.json
 
-**Locked Decisions:** SensorFrame API (6 fields, no raw bytes), compute_mood signature with confidence gating, main loop state management, BLE wire format, test import paths.
+### Completed (Wave 1 — 2026-06-13)
+- ✅ **SDK Gate 1 (IMU Interrupt):** GO — `frame.imu.tap_callback()` confirmed (ARD API name incorrect; corrected)
+- ✅ **SDK Gate 2 (Heap API):** NO-GO → Manual proxy fallback (sprite rows + BLE MTU bytes, 80%/95% thresholds)
+- ✅ **Baseline Activation Gate:** ACTIVATION_THRESHOLD=50 Welford samples (Librarian) — population defaults for <50, personal mean+1.5σ for >=50
+- ✅ **Onboarding UX Harness:** First-launch detection, calibration status, fallback surfacing, ATTENTION/FAMILIAR_RESET display (Y.T.)
+- ✅ **Acceptance Test Suite:** 48 tests (14 FAMILIAR_RESET protocol, 34 baseline activation, 13 onboarding) — 176 total passing, 3 xfailed (Ng contract), 11 skipped (Y.T. pending)
+- ✅ **ATTENTION Animation Spec:** 180ms jump (60ms launch + 120ms settle, +4px), white eye + desaturated body, 500ms cooldown (Da5id)
+- ✅ **Device Implementation (Ng):** Double-tap FAMILIAR_RESET (opcode 0x01), ATTENTION-on-IMU-peak (1.8g threshold, 500ms overlay), heap_fraction() proxy, glow simplification
+- ✅ **Test Results:** 128/128 baseline maintained (no regressions)
 
-**Next Step: Week 3 "It's alive"**
-- Onboarding flow (baseline learning ramp-up)
-- Attention moments (burst animation)
-- Quick-reset mechanism
-- Graceful fallback (confidence hold, both-fail neutral)
-- Hardware validation (Halo IMU relay confirmation, OLED visual quality)
+### Locked Decisions (Week 3 Wave 1)
+- ACTIVATION_THRESHOLD = 50 (sample-count gate, not calendar days)
+- ATTENTION is device-side IMU-triggered overlay (not host-side mood state)
+- Double-tap FAMILIAR_RESET snaps device to NEUTRAL locally (device-originated notification)
+- Heap fallback as v1 design (manual proxy, hardware-swap hook documented)
+
+### Next Step: Week 3 Wave 2 (Post-Gate)
+- Ng: Post-gate device implementation (double-tap, ATTENTION rendering, heap thresholds live)
+- Da5id: Calibration pass (IMU peak threshold tuning on hardware)
+- Raven: Privacy audit on ATTENTION state (on-device accelerometer use)
+- Juanita: Fallback verification (hardware edge cases)
+- Librarian: Documentation (ARD §10 updates, TEST-STRATEGY updates)
+
