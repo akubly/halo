@@ -1,6 +1,6 @@
 ---
 updated_at: 2026-06-11T00:00:00Z
-focus_area: VESPER Week 2 "It reacts" — MERGED (101 tests, both privacy gates approved)
+focus_area: VESPER Week 2 "It reacts" — IN PR REVIEW (128 tests, both privacy gates approved)
 active_issues: []
 status: Week 2 COMPLETE — Real sensors live, local inference (no cloud), privacy gates APPROVED
 ---
@@ -12,10 +12,10 @@ status: Week 2 COMPLETE — Real sensors live, local inference (no cloud), priva
 **WEEK 2 "It reacts" MERGED** — 2026-06-10 merge wave complete.
 
 **Status:**
-- ✅ 101 tests green (was 54 at start of Week 2)
+- ✅ 128 tests green (was 54 at start of Week 2)
 - ✅ Gate I7 (Mic buffer ≤1s, no raw bytes on SensorFrame public API) — **APPROVED**
 - ✅ Gate 1 (No raw biometrics on wire, encode_familiar_update signature gated) — **APPROVED**
-- ✅ Real mic + IMU sensors operational (sounddevice + numpy)
+- ✅ Real desktop-mic capture operational (sounddevice + numpy); Halo IMU relay scaffolded but held at imu_ok=False behind the SDK gap (BLE IMU characteristic unconfirmed, ARD §10) — runs mic-only until hardware validation
 - ✅ Local mood heuristic (no cloud): tension = pitch_variance×0.4 + acceleration×0.3 + rotation×0.3
 - ✅ Confidence gating (< 0.7 → suppress); 30s confidence-hold timeout; 10s both-fail → NEUTRAL
 - ✅ Intensity quantised to {0,25,50,75,100}, jittered ±5 before encode (Gate 2)
