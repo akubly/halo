@@ -177,6 +177,8 @@ class SensorStream:
     """
 
     def __init__(self, sample_rate: int = 16_000) -> None:
+        if sample_rate <= 0:
+            raise ValueError(f"sample_rate must be positive, got {sample_rate}")
         self.sample_rate = sample_rate
         # Rolling buffer: exactly one second of float32 samples.
         # Privacy gate I7: buffer is zeroed after each extraction.
@@ -239,6 +241,9 @@ class SensorStream:
         if self._stream is not None:
             try:
                 self._stream.stop()   # type: ignore[union-attr]
+            except Exception:
+                pass
+            try:
                 self._stream.close()  # type: ignore[union-attr]
             except Exception:
                 pass
@@ -277,13 +282,14 @@ class SensorStream:
         """sounddevice callback: fill rolling buffer with incoming samples."""
         if status:
             logger.warning("[SensorStream] audio callback status: %s", status)
-            self._mic_ok = False
+            with self._audio_lock:
+                self._mic_ok = False
             return
-        self._mic_ok = True
         mono = indata[:, 0] if indata.ndim > 1 else indata.ravel()
         n = len(mono)
         buf_len = len(self._buffer)
         with self._audio_lock:
+            self._mic_ok = True
             if n >= buf_len:
                 self._buffer[:] = mono[-buf_len:]
                 self._buffer_pos = 0
@@ -338,13 +344,22 @@ class SensorStream:
         if not math.isfinite(audio_pitch_variance):
             audio_pitch_variance = 0.0
 
+        # Fix 1: apply normalisation + clamp; 0.0 when IMU relay is not ready.
+        imu_ok = self._imu.ok
+        if imu_ok:
+            imu_acceleration = min(1.0, max(0.0, self._imu.acceleration / _IMU_ACCEL_NORM))
+            imu_rotation = min(1.0, max(0.0, self._imu.rotation / _IMU_ROT_NORM))
+        else:
+            imu_acceleration = 0.0
+            imu_rotation = 0.0
+
         return SensorFrame(
             audio_rms=audio_rms,
             audio_pitch_variance=audio_pitch_variance,
-            imu_acceleration=self._imu.acceleration,
-            imu_rotation=self._imu.rotation,
+            imu_acceleration=imu_acceleration,
+            imu_rotation=imu_rotation,
             mic_ok=mic_ok,
-            imu_ok=self._imu.ok,
+            imu_ok=imu_ok,
         )
 
 

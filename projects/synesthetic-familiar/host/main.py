@@ -38,8 +38,6 @@ from host.familiar_protocol import (
 )
 from host.sensors import FakeSensorStream, SensorFrame, SensorInitError, SensorStream
 from host.inference import (
-    Baseline,
-    CONFIDENCE_GATE,
     MoodResult,
     compute_mood,
     load_baseline,
