@@ -307,6 +307,20 @@ class TestLoadBaselineFailSafe:
             "load_baseline must return None for OSError/missing file."
         )
 
+    def test_float_sample_count_returns_none(self, tmp_path):
+        """sample_count=10.0 (float) → None; sample_count must be a strict int."""
+        p = tmp_path / "baseline.json"
+        p.write_text(json.dumps({
+            "mean": 0.42, "stddev": 0.08, "sample_count": 10.0,
+            "created_at": "2026-01-01T00:00:00"
+        }), encoding="utf-8")
+        result = load_baseline(p)
+        assert result is None, (
+            f"load_baseline must reject float sample_count (10.0). Got {result!r}. "
+            "sample_count must be a strict int to stay consistent with Baseline's type hint "
+            "and update_baseline's integer arithmetic."
+        )
+
     def test_valid_baseline_loads_correctly(self, tmp_path):
         """Sanity: a well-formed baseline file must load successfully."""
         p = tmp_path / "baseline.json"
