@@ -249,38 +249,36 @@ local function draw_halo_glow(cx, cy, mood_idx, intensity_norm)
   for ring = 1, #HALO_RADII do
     local r = HALO_RADII[ring]
     local brightness = HALO_BRIGHTNESS[ring] * int_scale
-    if brightness < 0.05 then goto continue_ring end  -- skip invisible rings
-    
-    -- Dim the base color by brightness factor (0xRRGGBB decomposition)
-    local rr = math.floor(((base_color >> 16) & 0xFF) * brightness)
-    local gg = math.floor(((base_color >> 8) & 0xFF) * brightness)
-    local bb = math.floor((base_color & 0xFF) * brightness)
-    local ring_color = (rr << 16) | (gg << 8) | bb
-    
-    -- Bresenham circle (set_pixel fallback for SDK gap)
-    -- Mid-point circle algorithm: only compute 1/8 arc, mirror to 8 octants
-    local x, y, d = r, 0, 1 - r
-    while x >= y do
-      -- 8-way symmetry
-      frame.display.set_pixel(cx + x, cy + y, ring_color)
-      frame.display.set_pixel(cx - x, cy + y, ring_color)
-      frame.display.set_pixel(cx + x, cy - y, ring_color)
-      frame.display.set_pixel(cx - x, cy - y, ring_color)
-      frame.display.set_pixel(cx + y, cy + x, ring_color)
-      frame.display.set_pixel(cx - y, cy + x, ring_color)
-      frame.display.set_pixel(cx + y, cy - x, ring_color)
-      frame.display.set_pixel(cx - y, cy - x, ring_color)
+    if brightness >= 0.05 then  -- skip invisible rings
+      -- Dim the base color by brightness factor (0xRRGGBB decomposition)
+      local rr = math.floor(((base_color >> 16) & 0xFF) * brightness)
+      local gg = math.floor(((base_color >> 8) & 0xFF) * brightness)
+      local bb = math.floor((base_color & 0xFF) * brightness)
+      local ring_color = (rr << 16) | (gg << 8) | bb
       
-      y = y + 1
-      if d < 0 then
-        d = d + 2 * y + 1
-      else
-        x = x - 1
-        d = d + 2 * (y - x) + 1
+      -- Bresenham circle (set_pixel fallback for SDK gap)
+      -- Mid-point circle algorithm: only compute 1/8 arc, mirror to 8 octants
+      local x, y, d = r, 0, 1 - r
+      while x >= y do
+        -- 8-way symmetry
+        frame.display.set_pixel(cx + x, cy + y, ring_color)
+        frame.display.set_pixel(cx - x, cy + y, ring_color)
+        frame.display.set_pixel(cx + x, cy - y, ring_color)
+        frame.display.set_pixel(cx - x, cy - y, ring_color)
+        frame.display.set_pixel(cx + y, cy + x, ring_color)
+        frame.display.set_pixel(cx - y, cy + x, ring_color)
+        frame.display.set_pixel(cx + y, cy - x, ring_color)
+        frame.display.set_pixel(cx - y, cy - x, ring_color)
+        
+        y = y + 1
+        if d < 0 then
+          d = d + 2 * y + 1
+        else
+          x = x - 1
+          d = d + 2 * (y - x) + 1
+        end
       end
     end
-    
-    ::continue_ring::
   end
 end
 
