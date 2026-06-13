@@ -116,7 +116,7 @@ class TestSensorSourcePort(unittest.TestCase):
                 f"SensorFrame.{field.name} annotation '{ann}' contains 'ndarray'. "
                 f"NumPy arrays are raw sample buffers — must not cross SensorSourcePort."
             )
-            assert "bytes" not in ann_str or field.name in ("mic_ok", "imu_ok"), (
+            assert "bytes" not in ann_str, (
                 f"SensorFrame.{field.name} annotation '{ann}' contains 'bytes'. "
                 f"Raw audio bytes must not appear in SensorFrame."
             )

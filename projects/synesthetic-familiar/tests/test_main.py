@@ -156,18 +156,27 @@ class TestApplyIntensityJitter(unittest.TestCase):
         - Clamps to [0, 100]
         - Is deterministic given the same seed
         """
-        # Verify ±5 range with seeded RNG across multiple quantised inputs
+        # Verify ±5 range across all quantised inputs, including boundary values.
+        # For each q, sweep all possible jitter deltas (-5..+5) to ensure the
+        # clamped result always lands in [max(0, q-5), min(100, q+5)].
         quantised_inputs = [0, 25, 50, 75, 100]
         for q in quantised_inputs:
-            rng_local = random.Random(42)
-            result = apply_intensity_jitter(q, rng=rng_local)
-            assert 0 <= result <= 100, (
-                f"apply_intensity_jitter({q}) = {result} — must be in [0, 100] (clamped)"
-            )
-            assert abs(result - q) <= 5 or (q == 0 and result >= 0) or (q == 100 and result <= 100), (
-                f"apply_intensity_jitter({q}) = {result} — jitter must be ≤ 5 before clamp. "
-                f"pre-clamp value was likely {result} (|{result} - {q}| = {abs(result - q)})"
-            )
+            lo = max(0, q - 5)
+            hi = min(100, q + 5)
+            for delta in range(-5, 6):
+
+                class FixedDeltaRng:
+                    def __init__(self, d: int) -> None:
+                        self._d = d
+
+                    def randint(self, a: int, b: int) -> int:
+                        return self._d
+
+                result = apply_intensity_jitter(q, rng=FixedDeltaRng(delta))
+                assert lo <= result <= hi, (
+                    f"apply_intensity_jitter({q}, delta={delta}) = {result} — "
+                    f"expected result in [{lo}, {hi}] (real jitter bound)"
+                )
 
     def test_jitter_deterministic_with_seeded_rng(self) -> None:
         """Same seed must produce same result every time (RNG injection contract §3)."""
