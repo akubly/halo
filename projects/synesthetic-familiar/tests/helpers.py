@@ -66,3 +66,4 @@ async def noop_sleep(seconds: float) -> None:
     Pass as ``sleep=noop_sleep`` to run() to make pacing free in tests while
     still asserting that the pacer is invoked (spy-wrap if needed).
     """
+    pass
