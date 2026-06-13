@@ -50,10 +50,15 @@
 8. "Open but non-blocking" is debt language; gate blocking items explicitly
 9. Confidence gating + liveness in tension; 30s timeout resolves it
 10. Jitter is polish, not privacy; obscurity + abstraction are real protection
+11. Week 3 pattern: SDK gates are the critical path — design the plan so ALL non-gate work starts immediately in parallel; treat gate outcomes as a fork, not a blocker, by pre-designing both paths
+
+### Phase 6: Week 3 Breakdown & Sequencing (2026-06-12)
+- Decomposed Week 3 "It's alive" into 15-item work breakdown
+- Identified critical path: SDK gates (Ng) → device features → verification
+- Sequenced 4-wave fan-out: gates+non-gate work parallel, device features post-gates, integration, polish
+- Plan approved by Aaron; full fan-out executed 2026-06-13
 
 ## Full Session History
 
-Archived in `.squad/agents/hiro/history-detailed-2026-06-12.md` (detailed ARD decisions, persona review applicati
-
-ons, scaffold creation, integration contract, PRD review passes).
+Archived in `.squad/agents/hiro/history-detailed-2026-06-12.md` (detailed ARD decisions, persona review applications, scaffold creation, integration contract, PRD review passes).
 

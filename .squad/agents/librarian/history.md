@@ -217,3 +217,64 @@ inference-side guard is the last line of defence before the persisted file.
 confidence modulation) but absent from the tension formula. A one-line comment
 prevents future readers from treating it as a bug or dead code.
 
+## Learnings — 2026-06-12 (Week 3 baseline activation gate)
+
+### Resolved OPEN Decision: Activation Threshold = 50 samples
+
+The OPEN decision from 2026-06-12 ("Baseline Activation Cadence") is resolved.
+Prior Week-2 behavior: personal threshold activated as soon as `baseline is not None`.
+Week-3 gate: `baseline.sample_count >= ACTIVATION_THRESHOLD (50)`.
+
+**Why sample count, not calendar days:**  
+ARD §5.4 says "3 days" as UX language, but the real criterion is Welford stddev
+stability.  Calendar time is wrong for an estimator gated by observation count —
+a baseline file from 5 days ago with 8 samples should stay "calibrating."
+`sample_count` already persists in `baseline.json` (no new field needed; Baseline
+dataclass fields locked §2.6), so restarts are transparent.
+
+**Why n = 50:**  
+SE(s) ≈ s/√(2n).  At n=50: SE/s ≈ 10%, meaning the personal stress threshold
+(mean + 1.5σ) is within ~0.15σ of its asymptotic value.  Below n=30, SE/s > 14%
+and the "personal" threshold could be noisier than the population default.
+
+### New public API surface (importable by Y.T.)
+
+Three new names exported from `host.inference`:
+- `ACTIVATION_THRESHOLD: int = 50` — the gate count
+- `ActivationState = Literal["calibrating", "personalized"]` — state type alias
+- `ActivationInfo` dataclass — `{state, sample_count, samples_needed, progress}`
+- `get_activation_info(baseline: Baseline | None) -> ActivationInfo` — pure function
+
+`compute_mood` is updated: personal threshold now requires
+`baseline.sample_count >= ACTIVATION_THRESHOLD` (not just `baseline is not None`).
+Existing confidence gating is unaffected.
+
+### Key invariant
+
+The activation state is fully derived from `baseline.sample_count`.  No new
+persistence fields.  No I/O in `get_activation_info`.  Juanita can unit-test
+the gate with plain `Baseline(…, sample_count=N, …)` construction.
+
+---
+
+## Week 3 "It's alive" — Baseline Activation Gate Implementation (2026-06-13)
+
+**Task:** Deliver the OPEN "Baseline Activation Cadence" decision from 2026-06-12 as Week 3 implementation.
+
+**Status:** SHIPPED
+
+**Deliverables:**
+- `ACTIVATION_THRESHOLD: int = 50` constant
+- `ActivationState = Literal["calibrating", "personalized"]` type alias
+- `ActivationInfo` dataclass with `{state, sample_count, samples_needed, progress: float}`
+- `get_activation_info(baseline: Baseline | None) -> ActivationInfo` pure function (no I/O, no clock)
+- `compute_mood()` gate: personal threshold only when `baseline.sample_count >= ACTIVATION_THRESHOLD`
+
+**Key invariant:** Baseline json fields **not changed** (locked §2.6). `sample_count` already persists; activation derives automatically.
+
+**Test surface:** 34 tests in `test_week3_baseline_activation.py` all passing. Pure function means no mocking.
+
+**Team integration:** Y.T. calls `get_activation_info()` at startup + post-update for UX progress display. Wiring via call-site TODO/ImportError pattern already in place in `get_calibration_status()`.
+
+**Decision file:** `.squad/decisions.md` (merged from `.squad/decisions/inbox/librarian-week3-activation-gate.md`)
+

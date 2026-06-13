@@ -1118,7 +1118,7 @@ p.zeros(sample_rate)\ at sensors.py:182
 **Date:** 2026-06-12  
 **Severity:** important  
 **Disposition:** deferred to Week 3  
-**Status:** OPEN
+**Status:** RESOLVED (2026-06-13) — Librarian landed ACTIVATION_THRESHOLD=50 gate in Week 3 implementation
 
 ### What
 
@@ -1136,3 +1136,1165 @@ ARD §5.4 specifies: "first 3 days population defaults, after day 3 personal mea
 
 Librarian, Week 3.
 
+
+
+---
+
+# ATTENTION Jump Animation Spec — Week 3
+
+**Author:** Da5id (HUD/UX)  
+**Date:** 2026-06-12  
+**Status:** PROPOSED — awaiting implementation by Ng  
+**ARD cross-refs:** §5.5 (HUD/Render), Week 3 build sequence (line 560), success criterion "feels alive not robotic" (line 567)  
+**Scope:** Synesthetic Familiar (VESPER), `projects/synesthetic-familiar/device/main.lua`
+
+---
+
+## Summary
+
+When the wearer's IMU registers a peak (sharp head movement, ≤50ms detection per Ng's gate verdict), the creature performs a brief **attention jump** — a vertical burst that acknowledges the wearer without disrupting the ambient bob rhythm. This spec defines the motion, visual state changes, tunable parameters, and keyframe sequence.
+
+---
+
+## 1. Motion Design — The "Attention Jump"
+
+### Core concept
+
+The jump is a **single upward burst** followed by a soft **settle-back** to the bob baseline. It reads in <200ms, feels like a startled "oh!" reaction, and smoothly re-joins the existing bob cycle.
+
+### Why upward?
+
+- Upward motion = alert, attentive (screen-language convention)
+- Downward would read as dejection or recoil
+- Horizontal would conflict with the 7 o'clock rim position (creature might clip display edge)
+
+### Motion curve
+
+| Phase | Duration | Y offset from bob baseline | Easing |
+|-------|----------|---------------------------|--------|
+| **Rest** | — | `0` (normal bob continues) | — |
+| **Launch** | 60ms | `0 → +ATTENTION_JUMP_AMP_PX` | ease-out-quad (fast start, decelerating) |
+| **Settle** | 120ms | `+ATTENTION_JUMP_AMP_PX → 0` | ease-in-out-quad (soft landing, slight overshoot allowed) |
+
+**Total duration:** 180ms (within <200ms legibility window).
+
+### Amplitude
+
+**`ATTENTION_JUMP_AMP_PX = 4`** — double the bob amplitude (±2px).
+
+- **Why 4px:** Must be visually distinct from the ±2px bob without being jarring. 4px is the minimum that reads as "jump" vs "slightly bigger bob frame."
+- **Why not larger:** At 24×24 sprite with center at y=179, a larger jump risks pushing the sprite near canvas edge. 4px keeps it safe within the 7 o'clock margin.
+
+### Integration with existing bob
+
+The jump offset **adds to** the current bob offset, not replaces it. During the 180ms attention window:
+
+```
+render_y = base_y + bob_offset + attention_offset
+```
+
+Where `attention_offset` animates 0 → +4 → 0 over the launch+settle curve.
+
+After the 180ms, `attention_offset` = 0 and normal bob resumes seamlessly. No phase-reset — the bob continues from wherever it was.
+
+---
+
+## 2. Visual State — ATTENTION Palette (state [3])
+
+The ATTENTION palette is already stubbed in `main.lua` line 141–146:
+
+```lua
+[3] = { -- ATTENTION: high contrast white eye
+  [1] = 0x1A1A1A,   -- body dark (neutral gray)
+  [2] = 0x2E2E2E,   -- body mid (neutral gray)
+  [3] = 0xFFFFFF,   -- eye white (PURE WHITE)
+  [4] = 0x0D0D0D,   -- shadow
+},
+```
+
+### Why this works
+
+- **Eye goes pure white (0xFFFFFF):** Maximum contrast against any body tone. Instantly draws the eye. Reads as "I see you."
+- **Body desaturates to neutral gray:** Removes the mood color (teal/amber/blue) so the creature briefly "pauses" its emotional expression. This distinguishes ATTENTION from STRESSED (which uses warm amber body).
+- **No halo, no fraying:** ATTENTION is a momentary overlay — no time for ambient effects. The 180ms window is too short for halo glow or fraying to register.
+
+### Posture change — "Eye open wide"
+
+During the attention moment, **the eye can optionally dilate** (expand by 1px in each direction). This requires no sprite change — it's a render-time effect:
+
+| Parameter | Value |
+|-----------|-------|
+| `ATTENTION_EYE_DILATE_PX` | 1 |
+| Implementation | When mood=ATTENTION, inflate eye pixels (palette index 3) by 1px radius during `draw_creature()` |
+
+**⚠️ FLAG FOR AARON:** Eye dilation is a "nice to have" that adds complexity to the render loop (must detect eye region, expand it). The pure-white eye alone may be sufficient for the "I notice you" read. **Recommend: ship without dilation for Week 3, add as polish if the jump feels under-emphasized.**
+
+---
+
+## 3. Tunable Parameters (Lua constants for Ng)
+
+```lua
+-- ─── ATTENTION Jump Animation (Week 3, Da5id spec) ─────────────────────────────
+local ATTENTION_JUMP_AMP_PX   = 4       -- upward burst amplitude (pixels)
+local ATTENTION_LAUNCH_MS     = 60      -- time to reach peak (ms)
+local ATTENTION_SETTLE_MS     = 120     -- time to return to baseline (ms)
+local ATTENTION_DURATION_MS   = 180     -- total animation window (launch + settle)
+local ATTENTION_COOLDOWN_MS   = 500     -- minimum time between attention triggers
+
+-- Easing helper: quadratic ease-out (t in 0..1 → 0..1, decelerating)
+local function ease_out_quad(t)
+    return 1 - (1 - t) * (1 - t)
+end
+
+-- Easing helper: quadratic ease-in-out (smooth acceleration/deceleration)
+local function ease_in_out_quad(t)
+    if t < 0.5 then
+        return 2 * t * t
+    else
+        return 1 - ((-2 * t + 2) ^ 2) / 2
+    end
+end
+```
+
+### State additions
+
+```lua
+state.attention_active   = false     -- is attention animation playing?
+state.attention_start_t  = 0         -- timestamp when attention triggered
+state.attention_last_t   = 0         -- last attention trigger (for cooldown)
+```
+
+### Trigger logic (integrates with Ng's IMU-peak poll)
+
+```lua
+-- In render loop, after Ng's IMU-peak detection:
+local function trigger_attention(t_now)
+    if state.attention_active then return end   -- already animating
+    if (t_now - state.attention_last_t) * 1000 < ATTENTION_COOLDOWN_MS then return end
+    
+    state.attention_active  = true
+    state.attention_start_t = t_now
+    state.attention_last_t  = t_now
+    state.mood              = 3   -- switch to ATTENTION palette
+end
+
+-- In render loop, compute attention_offset:
+local function compute_attention_offset(t_now)
+    if not state.attention_active then return 0 end
+    
+    local elapsed_ms = (t_now - state.attention_start_t) * 1000
+    if elapsed_ms >= ATTENTION_DURATION_MS then
+        state.attention_active = false
+        state.mood = 0   -- return to neutral (or previous mood if tracked)
+        return 0
+    end
+    
+    if elapsed_ms < ATTENTION_LAUNCH_MS then
+        -- Launch phase: ease-out-quad up
+        local t = elapsed_ms / ATTENTION_LAUNCH_MS
+        return math.floor(ATTENTION_JUMP_AMP_PX * ease_out_quad(t) + 0.5)
+    else
+        -- Settle phase: ease-in-out-quad down
+        local t = (elapsed_ms - ATTENTION_LAUNCH_MS) / ATTENTION_SETTLE_MS
+        return math.floor(ATTENTION_JUMP_AMP_PX * (1 - ease_in_out_quad(t)) + 0.5)
+    end
+end
+```
+
+---
+
+## 4. ASCII Keyframe Sketch
+
+```
+Time:      0ms        30ms       60ms       90ms       150ms      180ms
+           │          │          │          │          │          │
+           ▼          ▼          ▼          ▼          ▼          ▼
+
+    ┌──────────────────────────────────────────────────────────────────┐
+    │                                                                  │
+    │              ·                                                   │   +4px
+    │             ╭──╮  ← PEAK                                         │   (jump)
+    │            (  O )  (eye = white)                                 │
+    │             ╰──╯                                                 │
+    │                                                                  │
+    │       ╭──╮          ╭──╮                                 ╭──╮    │   +2px
+    │      (  O )        (  O )                               (  O )   │
+    │       ╰──╯          ╰──╯                                 ╰──╯    │
+    │                                                                  │
+    │  ╭──╮                      ╭──╮                    ╭──╮          │   0px
+    │ (  o )                    (  o )                  (  o )         │   (baseline)
+    │  ╰──╯                      ╰──╯                    ╰──╯          │
+    │  REST                      SETTLING               REST           │
+    │  (bob continues)           (soft landing)         (bob resumes)  │
+    │                                                                  │
+    └──────────────────────────────────────────────────────────────────┘
+          ↑                  ↑                  ↑                  ↑
+        IMU peak           60ms               120ms              180ms
+        triggers         (peak)             (settling)          (done)
+
+Eye state:
+  REST:      o  (mood-colored, e.g. cyan-white or amber)
+  ATTENTION: O  (pure white 0xFFFFFF)
+
+Body state:
+  REST:      mood-colored (teal/amber/blue-gray)
+  ATTENTION: neutral gray (desaturated)
+```
+
+---
+
+## 5. Glance-Ergonomics Check — ATTENTION vs STRESSED
+
+| Axis | STRESSED (mood=2) | ATTENTION (mood=3) |
+|------|-------------------|-------------------|
+| **Trigger** | Host inference (voice/IMU over time) | Device IMU peak (single sharp motion) |
+| **Duration** | Sustained (seconds–minutes) | Transient (180ms) |
+| **Body color** | Warm amber (0x56_30_20) | Neutral gray (0x2E_2E_2E) |
+| **Eye color** | Amber (0xFF_88_00) | Pure white (0xFF_FF_FF) |
+| **Bob frequency** | Fast (0.75Hz = 1.3s cycle) | N/A (jump interrupts bob) |
+| **Edge fraying** | Yes (16 scatter pixels) | No |
+| **Motion** | Continuous fast bob | Single upward burst |
+
+### Why these don't collide
+
+1. **Temporal signature:** STRESSED is sustained; ATTENTION is a brief pulse. Even if both fire in the same second, the 180ms ATTENTION burst reads as a "moment" against the STRESSED backdrop.
+
+2. **Color channel:** ATTENTION desaturates the body to gray and the eye to white. STRESSED stays warm amber throughout. The color shift is the primary distinguisher in peripheral vision.
+
+3. **Motion pattern:** STRESSED has continuous fast bob. ATTENTION has a single asymmetric burst (fast up, slow down). Even if bob frequency is fast during stressed, the +4px jump reads as discontinuous.
+
+4. **No fraying during ATTENTION:** The clean edge during the 180ms window contrasts with the stressed fraying that was present before/after. This "pause in chaos" reinforces the attention moment.
+
+### Edge case: ATTENTION triggered while STRESSED
+
+If the wearer is in STRESSED state and then makes a sharp head movement:
+
+1. `trigger_attention()` fires → `state.mood = 3` (ATTENTION)
+2. Body goes gray, eye goes white, jump animates
+3. After 180ms, `state.mood` should return to **STRESSED (2)**, not NEUTRAL (0)
+
+**⚠️ FLAG FOR NG:** The current spec returns to NEUTRAL (mood=0) after attention. This is correct if the host is sending mood continuously (next FAMILIAR_UPDATE will re-assert STRESSED). But if there's a 100ms gap, the creature will flicker neutral→stressed. **Recommend: track `state.mood_before_attention` and restore it after the 180ms window.**
+
+---
+
+## 6. Open Questions for Aaron
+
+1. **Eye dilation (Section 2):** Should we ship Week 3 with eye dilation (+1px during ATTENTION), or defer as polish? My recommendation: defer — the pure-white eye and jump motion should be sufficient.
+
+2. **Mood restoration (Section 5 edge case):** Should ATTENTION restore to previous mood or let the next host update determine it? My recommendation: restore to previous mood (track `state.mood_before_attention`) to avoid visual flicker.
+
+---
+
+## Checklist for Ng
+
+- [ ] Add `ATTENTION_JUMP_AMP_PX`, `ATTENTION_LAUNCH_MS`, `ATTENTION_SETTLE_MS`, `ATTENTION_DURATION_MS`, `ATTENTION_COOLDOWN_MS` constants
+- [ ] Add `ease_out_quad()` and `ease_in_out_quad()` helpers
+- [ ] Add `state.attention_active`, `state.attention_start_t`, `state.attention_last_t`, `state.mood_before_attention`
+- [ ] Wire `trigger_attention()` to IMU-peak detection (from Ng's SDK gate work)
+- [ ] Add `compute_attention_offset()` in render loop; apply to `render_y`
+- [ ] Confirm ATTENTION palette (state [3]) renders correctly on device
+- [ ] Test: attention jump is visually distinct from stressed fast-bob
+- [ ] Test: rapid head shakes don't spam attention (500ms cooldown)
+
+
+---
+
+# Week 3 "It's alive" — Work Breakdown & Sequencing
+
+**By:** Hiro (Architect)  
+**Date:** 2026-06-12  
+**Status:** PROPOSED (awaiting Aaron approval)  
+**Scope:** Decompose Week 3 deliverables into sequenced, owner-assigned work items
+
+---
+
+## Context
+
+Week 2 "It reacts" merged 2026-06-10 (commit 57d0c23). 128 tests green, both
+privacy gates approved. The codebase has real sensor capture, local mood
+inference, confidence gating, fallback logic, and visual enhancements all
+working. Week 3 is the final Phase-1 milestone.
+
+**Key constraint:** Two SDK gates (IMU interrupt callback, heap API) are
+unresolved. Ng is investigating in parallel. The plan below is designed to
+work with EITHER the interrupt path OR the debounced-poll fallback — no work
+item blocks on a specific gate outcome.
+
+---
+
+## Done Bar (ARD §9 + TEST-STRATEGY §7.5)
+
+Week 3 is DONE when:
+
+1. Aaron feels creature is **"alive" (not robotic)** after 1 hour of wear
+2. **Gesture resets work** — double-tap FAMILIAR_RESET locally snaps device to NEUTRAL; host sees FAMILIAR_RESET notification
+3. **No OOM or BLE freeze** during session
+4. **Privacy audit** — non-wearer cannot infer stress/calm from 5 min observation; no labeled text visible
+5. Baseline learning ramp-up operational (population defaults days 1–3, personal mean+1.5σ after)
+6. ATTENTION overlay fires on IMU peak
+7. BLE timeout → NEUTRAL after 10s (device-side, already implemented — verify on hardware)
+
+---
+
+## Work-Item Table
+
+| # | Item | Owner | Starts | Depends On | Notes |
+|---|------|-------|--------|------------|-------|
+| W3-A | **SDK gate resolution: IMU interrupt** — confirm `frame.imu.on_tap` availability; if unavailable, implement debounced poll loop (≤50ms latency) | Ng | **NOW** (in progress) | — | Go/no-go gate. Outcome determines W3-C and W3-D implementation path. If interrupt unavailable, Ng ships the poll fallback directly. |
+| W3-B | **SDK gate resolution: Heap API** — confirm `frame.system.get_heap_usage()`; if unavailable, implement manual allocation tracker (count sprite rows + BLE buffer bytes) | Ng | **NOW** (in progress) | — | Go/no-go gate. If unavailable, manual proxy is the v1 design. |
+| W3-C | **Double-tap FAMILIAR_RESET** — wire up the commented-out `on_tap(2, ...)` handler in `device/main.lua` (or poll-based equivalent per W3-A outcome); device snaps to NEUTRAL, sends opcode 0x01 | Ng | After W3-A | W3-A | Stub already exists (main.lua:373–380). Implementation is ~10 lines either path. |
+| W3-D | **ATTENTION overlay on IMU peak** — implement `on_imu_peak` handler; device enters ATTENTION state [3] for 500ms, then returns to previous state (ARD §5.1: overlay, not peer state) | Ng | After W3-A | W3-A | Host must also send mood=3 on IMU spike detection. Coordinate with Y.T. on host-side trigger in main.py. |
+| W3-E | **Heap monitoring (80%/95%)** — add heap guard to render loop: 80% → reduce animation complexity; 95% → safe-halt | Ng | After W3-B | W3-B | Thresholds are initial estimates — tune on real device. |
+| W3-F | **Baseline activation gate** — add explicit `sample_count ≥ N` and/or `≥3-day age` check in `inference.py` before switching from population defaults to personal threshold (decisions.md 2026-06-12 follow-up) | Librarian | **NOW** | — | Currently personal threshold activates as soon as baseline file exists — collapses warmup period. Pure logic change, well-scoped. |
+| W3-G | **First-launch onboarding UX** — host-side Python flow: detect no baseline → show calibration prompt; display "learning your patterns" status during days 1–3; smooth transition to personal thresholds | Y.T. | **NOW** | — | CLI/logging-based for v1 (no GUI). Hooks into baseline load/save path. Coordinate with Librarian on activation gate (W3-F). |
+| W3-H | **ATTENTION trigger from host** — host-side IMU peak detection → send mood=ATTENTION via FAMILIAR_UPDATE when acceleration spike exceeds threshold | Y.T. | **NOW** | — | Can start with threshold logic immediately. Device-side rendering of ATTENTION state is already palette-ready (PALETTE[3], main.lua:141). Wire format supports mood=3. |
+| W3-I | **Snapshot zeroing hardening (W3-1)** — harden mic buffer zeroing in `sensors.py`; ensure buffer is cleared on every code path, not just happy path | Ng | **NOW** | — | Non-blocking follow-up from Week 2 privacy review. Surgical change. |
+| W3-J | **ATTENTION visual — jump animation** — implement 15px jump-toward-center + return animation in device render loop (ARD §5.5: ATTENTION row) | Da5id | After W3-A | W3-A (need to know interrupt vs poll for timing) | Currently ATTENTION has a palette but no special animation — just faster bob. Da5id specifies the jump; Ng implements in Lua. |
+| W3-K | **Graceful fallback verification** — verify BLE timeout → NEUTRAL (device-side, already coded at main.lua:396–403); verify confidence-hold 30s timeout; verify both-fail 10s → NEUTRAL. All on real hardware. | Juanita | After W3-C, W3-E | W3-C (reset), W3-E (heap guard) | Logic already exists from Week 2. This is hardware validation + edge case testing, not new code. |
+| W3-L | **Week 3 acceptance tests** — write tests for: double-tap reset, ATTENTION overlay timing, baseline activation gate, heap guard thresholds, onboarding flow | Juanita | **NOW** (test-first) | — | Can write failing tests immediately against the contract. Tests drive W3-C/D/E/F/G. |
+| W3-M | **Privacy audit (Week 3)** — 5-min bystander observation test; verify no labeled text; verify abstract visuals remain opaque; confirm no new cloud imports | Raven | After W3-D, W3-G | W3-D (ATTENTION visual), W3-G (onboarding text) | Audit the ATTENTION state visuals and any onboarding display text. |
+| W3-N | **Threshold tuning + polish** — tune confidence thresholds, stress_threshold, calm_threshold on real hardware; adjust anti-robotic jitter; 1-hour wear session | Y.T. + Ng | After W3-C through W3-J | All functional items | Final integration. Aaron's subjective "feels alive" bar lives here. |
+| W3-O | **Documentation** — update ARD §10 with SDK gap resolutions; update TEST-STRATEGY with new test IDs; document onboarding flow; mark Phase 1 privacy checklist items | Librarian | After W3-N | W3-N | Captures final state. |
+
+---
+
+## Sequencing — Recommended Fan-Out
+
+### Wave 1 — Start NOW (no gates)
+
+Fan out these agents immediately — all can begin in parallel:
+
+| Agent | Item(s) | Rationale |
+|-------|---------|-----------|
+| **Ng** | W3-A, W3-B (SDK gates) + W3-I (snapshot zeroing) | Gate-resolving work is critical path. Snapshot zeroing is independent. |
+| **Librarian** | W3-F (baseline activation gate) | Pure logic in inference.py; no dependencies; well-specified in decisions.md. |
+| **Y.T.** | W3-G (onboarding UX) + W3-H (ATTENTION host trigger) | Host-side work has no SDK gate dependency. Can ship the host half while device half waits. |
+| **Juanita** | W3-L (acceptance tests — test-first) | Write failing tests against the Week 3 contract now; they drive implementation. |
+
+### Wave 2 — After SDK gates resolve (W3-A, W3-B)
+
+| Agent | Item(s) | Trigger |
+|-------|---------|---------|
+| **Ng** | W3-C (double-tap), W3-D (ATTENTION device), W3-E (heap guard) | W3-A and W3-B resolved (either interrupt or fallback accepted) |
+| **Da5id** | W3-J (ATTENTION jump animation spec) | W3-A resolved (timing depends on interrupt vs poll) |
+
+### Wave 3 — Integration & verification
+
+| Agent | Item(s) | Trigger |
+|-------|---------|---------|
+| **Juanita** | W3-K (graceful fallback verification on hardware) | W3-C, W3-E complete |
+| **Raven** | W3-M (privacy audit) | W3-D, W3-G complete |
+
+### Wave 4 — Polish & ship
+
+| Agent | Item(s) | Trigger |
+|-------|---------|---------|
+| **Y.T. + Ng** | W3-N (threshold tuning, 1-hour wear, "feels alive" bar) | All functional items merged |
+| **Librarian** | W3-O (documentation) | W3-N complete |
+
+---
+
+## Go/No-Go Decision Points
+
+### Gate 1: IMU Interrupt (W3-A)
+
+- **If interrupt available:** Wire `frame.imu.on_tap(2, callback)` directly. Clean path.
+- **If poll-only:** Ng implements debounced poll loop (≤50ms). Double-tap detection latency slightly higher but acceptable for v1.
+- **If NEITHER works (no IMU access at all):** ATTENTION trigger is disabled in v1; double-tap reset is disabled. **Scope-cut recommendation:** ship without gesture features, document as Phase 2. Creature still "feels alive" through onboarding + fallback + baseline learning. This is a downgrade but not a blocker.
+
+### Gate 2: Heap API (W3-B)
+
+- **If `get_heap_usage()` available:** Direct monitoring. Clean path.
+- **If unavailable:** Manual allocation tracking (count known allocations). Acceptable for v1 — the sprite is 288 bytes, BLE buffers are small, real OOM risk is low.
+- **Failure mode if wrong:** Worst case is an undetected slow leak during a long session. Mitigated by the 1-hour wear test (W3-N).
+
+### Scope-Cut Recommendations If Gates Fail
+
+| If this fails… | Cut this | Keep this | Impact |
+|----------------|----------|-----------|--------|
+| IMU interrupt AND poll | W3-C (reset), W3-D (ATTENTION), W3-J (jump anim) | Everything else | "Alive" bar still achievable via onboarding + baseline learning + fallback grace |
+| Heap API AND manual tracking | W3-E (heap guard) | Everything else | Accept OOM risk for v1; mitigate with shorter session guidance |
+| Both | W3-C/D/E/J | W3-F/G/H/I/K/L/M/N/O | Reduced but shippable. Document as Phase 2 follow-ups. |
+
+---
+
+## Critical Path
+
+```
+W3-A (SDK: IMU) ──┬── W3-C (double-tap) ──┐
+                  ├── W3-D (ATTENTION)  ──┤
+                  └── W3-J (jump anim)  ──┼── W3-K (verify) ── W3-N (polish) ── W3-O (docs)
+W3-B (SDK: heap) ──── W3-E (heap guard) ──┘
+                                           ├── W3-M (privacy audit)
+W3-F (activation gate) ───────────────────┘
+W3-G (onboarding) ────────────────────────┘
+W3-H (ATTENTION host) ────────────────────┘
+W3-L (tests) ─────────────────────────────┘
+W3-I (snapshot zeroing) ── done ──────────┘
+```
+
+**Bottleneck:** W3-A (IMU gate). Everything gesture-related waits on this. Start it first, resolve it fast.
+
+---
+
+## Notes
+
+- **Device-side fallback logic already exists** — BLE timeout → NEUTRAL (main.lua:396–403) and both-sensors-fail → NEUTRAL (main.py:357–364) were built in Week 2. Week 3 verifies them on hardware, not re-implements.
+- **ATTENTION palette is already in main.lua** (PALETTE[3], line 141). Week 3 adds the trigger and animation, not the color scheme.
+- **Onboarding is CLI-based for v1** — no GUI. "Learning your patterns" is a log message, not a screen. Phase 2 may add a Flutter/web dashboard.
+- **The "feels alive" bar is subjective** — Aaron judges this during the 1-hour wear test. We cannot automate it. The objective proxy is: "no OOM, no BLE freeze, gesture works, baseline adapts."
+
+
+---
+
+# Juanita Week 3 Test Plan Decision
+
+| Field | Value |
+|-------|-------|
+| **Author** | Juanita (Tester / QA) |
+| **Date** | 2026-06-13 |
+| **Status** | PROPOSED — for team review |
+| **Scope** | Week 3 "It's alive" acceptance tests |
+| **Files** | `tests/test_week3_reset.py`, `tests/test_week3_baseline_activation.py`, `tests/test_week3_onboarding.py` |
+
+---
+
+## Summary
+
+48 new passing tests, 3 xfailed (Ng: FAMILIAR_RESET host reaction), 11 skipped pending Y.T. module.
+Suite: **128 → 176 passing**, green.
+
+---
+
+## What Was Tested
+
+### 1. FAMILIAR_RESET — Protocol Decode (test_week3_reset.py, Group 1)
+**Status: PASS** — `familiar_protocol.py` is fully landed.
+
+14 tests covering:
+- `decode_familiar_reset` rejects wrong length, wrong opcode
+- `dispatch_device_message(b'\x01')` returns `FamiliarReset()` (zero-field dataclass)
+- Malformed 2-byte packets return None (log-and-drop contract)
+- Parametrised bad-opcode table (0x00, 0x02, 0x80, 0xFF)
+
+### 2. FAMILIAR_RESET — Host State Reaction (test_week3_reset.py, Group 2)
+**Status: XFAIL** — pending Ng, Week 3.
+
+3 tests (xfail strict=False):
+- `test_reset_triggers_neutral_send`: after FAMILIAR_RESET, host sends ≥1 NEUTRAL packet
+- `test_reset_restarts_sequence_counter`: first post-reset packet has seq=0x0000 (ARD §5.2 reconnect)
+- `test_reset_during_gated_session_clears_stale_mood`: reset fires NEUTRAL even mid-suppressed session
+
+**Contract required from Ng:**
+```
+run() on_receive callback sets a flag when FamiliarReset arrives.
+Each loop frame: if flag set → send NEUTRAL, call seq.reset(), clear transient state.
+```
+
+**I will REJECT Ng's PR if:**
+- `run()` ignores FAMILIAR_RESET (Group 2 stays red on merge)
+- seq counter is NOT reset after FAMILIAR_RESET (wire dedup breaks on reconnect)
+
+### 3. W3-1 Snapshot Zeroing (test_week3_reset.py, Group 3)
+**Status: PASS** — sensors.py 3-layer zeroing already correct.
+
+2 structural tests:
+- `finally` block present in `_extract_frame`
+- `samples[:] = 0.0` followed by `del samples` in that block
+
+**I will REJECT any PR that:**
+- Removes the `finally` block
+- Moves `del samples` before zeroing
+
+### 4. Baseline Activation Gate (test_week3_baseline_activation.py)
+**Status: PASS** — Librarian landed `ACTIVATION_THRESHOLD = 50` and the gate in `compute_mood()`.
+
+34 tests covering:
+- `ACTIVATION_THRESHOLD` is an exported positive int >= 30 (statistical basis)
+- `get_activation_info()` returns correct `ActivationInfo` for all cases
+- Population defaults with no baseline
+- Population defaults enforced for `sample_count < 50`
+- Personal threshold active for `sample_count >= 50`
+- Exact boundary: `== 50` activates personal, `== 49` stays population
+- Confidence suppression holds in both calibrating and personalized states
+- Baseline persistence round-trip (save/load) survives across restart
+
+**I will REJECT any PR that:**
+- Changes the `>=` boundary to `>` (off-by-one)
+- Removes the gate (back to "any non-None baseline → personal threshold")
+- Breaks confidence gating in either activation state
+
+### 5. Onboarding Flow (test_week3_onboarding.py)
+**Status: 11 SKIPPED** — `host/onboarding.py` not yet written by Y.T.
+
+11 tests (xfail, auto-skip when module missing) covering:
+- `is_first_launch(path)` returns `True` when no baseline.json, `False` when present
+- Empty file (corrupted but exists) counts as returning user
+- `run_first_launch_flow(baseline_path)` completes without raising
+- Flow creates a marker so second launch is not first launch
+- Flow auto-creates parent directories (fresh machine)
+- No BLE SDK imports in onboarding code
+- `run_returning_flow(None)` degrades gracefully
+
+2 tests PASS TODAY (integration tests using only `host.inference`):
+- `load_baseline(missing_path)` → None (population defaults fallback)
+- `load_baseline(valid_path)` → Baseline (returning user)
+
+**Contract for Y.T.:**
+```python
+# host/onboarding.py
+def is_first_launch(baseline_path: Path) -> bool: ...  # pure, no side effects
+def run_first_launch_flow(*, baseline_path: Path = _BASELINE_PATH) -> None: ...
+def run_returning_flow(baseline: Baseline | None) -> None: ...
+```
+
+**I will REJECT Y.T.'s PR if:**
+- `is_first_launch` has side effects or hardcodes `~/.vesper/baseline.json`
+- `run_first_launch_flow` does NOT create a marker (so launch repeats on restart)
+- Any BLE SDK import appears in `host/onboarding.py`
+
+---
+
+## Test Infrastructure Used
+
+- `ResetInjectingTransport`: extends `FakeTransport`; injects `b'\x01'` after Nth send
+- All `FakeTransport`, `FakeClock`, `FakeSensorStream`, `noop_sleep` from `helpers.py`
+- All parametrized tests use plain pytest class (no TestCase) — project rule
+- `tmp_path` fixture used exclusively for baseline file tests (real `~/.vesper/` never touched)
+
+---
+
+## Key Contracts / Discoveries
+
+### compute_mood() with low sample_count baseline uses POPULATION defaults
+**Finding:** Before today's tests, it was unclear whether the Librarian had landed the
+activation gate. Tests confirmed `ACTIVATION_THRESHOLD = 50` with `>=` comparison. At
+sample_count=49, population defaults hold. At sample_count=50, personal threshold engages.
+
+### FAMILIAR_RESET host reaction is NOT yet implemented
+`main.py`'s `_make_device_msg_handler()` logs FAMILIAR_RESET but does nothing else. Ng must
+add a mechanism for the async `run()` loop to observe the callback's FAMILIAR_RESET signal
+(e.g., a `nonlocal` flag or `asyncio.Event` set in the callback).
+
+### Onboarding module (host/onboarding.py) does not yet exist
+Y.T. must create it. `get_activation_info()` is already in `host/inference.py` (Librarian
+Week 3 addition), ready for Y.T. to consume for progress display.
+
+---
+
+## What I Will NOT Approve
+
+| Scenario | Reason |
+|----------|--------|
+| Ng merges FAMILIAR_RESET without host state reset | Group 2 stays red; seq dedup breaks on reconnect |
+| Librarian reverts >= gate to "any non-None baseline" | Group 4 fails; week-old baseline immediately personalizes |
+| Y.T. hardcodes baseline path in `is_first_launch` | Tests need `tmp_path` injection; hardcoded path touches real ~/.vesper |
+| Removing finally block from `_extract_frame` | W3-1 structural guard fails; privacy regression |
+| Confidence gating broken by activation gate changes | Group 7 turns red; LIBRARIAN-T2-5-ERROR violated |
+
+
+---
+
+# Baseline Activation Gate — Population→Personal Threshold (Week 3)
+
+**By:** Librarian (AI/ML)  
+**Date:** 2026-06-12  
+**Resolves:** OPEN item "2026-06-12: Week-3 Follow-up — Baseline Activation Cadence (Population→Personal Threshold Gate)" in `.squad/decisions.md`  
+**Status:** RESOLVED  
+**File scope:** `projects/synesthetic-familiar/host/inference.py` only  
+
+---
+
+## Decision
+
+**ACTIVATION_THRESHOLD = 50 Welford samples.**
+
+Until `baseline.sample_count ≥ 50`, `compute_mood()` uses population defaults
+(`STRESS_THRESHOLD = 0.65`, `CALM_THRESHOLD = 0.35`).  Once the threshold is
+crossed, it switches to the personal stress threshold (`mean + 1.5 × stddev`).
+Calm threshold remains population default unconditionally (ARD §2.6 — no personal
+calm formula defined).
+
+---
+
+## Reasoning
+
+### Why sample count, not calendar days
+
+ARD §5.4 says "first 3 days: population defaults".  Calendar time is the wrong
+gate for a sample-count-based estimator:
+
+- A baseline file created 5 days ago but used for only 5 minutes (10 samples)
+  should remain "calibrating" — the Welford stddev has no statistical meaning yet.
+- A device that is off for days accumulates no samples; wall-clock elapsed time
+  would falsely advance the gate.
+- `sample_count` is already persisted in `baseline.json`; no new field needed.
+  Restarts are transparent — ramp-up does not reset on relaunch.
+
+Calendar days are aspirational UX language; sample count gates when the *math*
+is trustworthy.
+
+### Why n ≥ 50
+
+The standard error of the Welford sample-stddev estimator is:
+
+```
+SE(s) ≈ s / √(2n)
+```
+
+| n  | SE(s)/s | Quality |
+|----|---------|---------|
+| 2  | 71%     | effectively zero — stddev=0.0 until n≥2; threshold = mean, useless |
+| 10 | 22%     | very noisy; personal threshold could swing ±0.33σ |
+| 30 | 13%     | CLT begins to apply; still >10% relative error |
+| 50 | 10%     | threshold is within ~0.15σ of asymptotic value — acceptable heuristic |
+| 100| 7%      | robust, but delays personalization with no meaningful UX benefit |
+
+**n = 50** is the minimum where the personal stress threshold (`mean + 1.5σ`) is
+within ≈0.15σ of its long-run value.  This is well within the noise floor of the
+heuristic (confidence steps of 0.8/0.6 on a ±0.35 tension range).
+
+At n < 30, stddev could be so imprecise that the "personal" threshold is actually
+worse than the population default — defeating the purpose of personalization.
+
+---
+
+## Implementation
+
+### New public API (importable by Y.T.)
+
+```python
+ACTIVATION_THRESHOLD: int = 50
+ActivationState = Literal["calibrating", "personalized"]
+
+@dataclasses.dataclass
+class ActivationInfo:
+    state: ActivationState   # "calibrating" | "personalized"
+    sample_count: int        # samples accumulated so far
+    samples_needed: int      # = ACTIVATION_THRESHOLD (50)
+    progress: float          # 0.0–1.0, capped at 1.0
+
+def get_activation_info(baseline: Baseline | None) -> ActivationInfo: ...
+```
+
+`get_activation_info` is a **pure function** — no I/O, no clock, no global
+mutation.  Y.T.'s UX layer calls it after `load_baseline()` at startup and
+after each `update_baseline()` call.
+
+### compute_mood change
+
+```python
+# Before (Week 2 — activates as soon as baseline file exists):
+if baseline is not None:
+    stress_threshold = baseline.mean + 1.5 * baseline.stddev
+
+# After (Week 3 — gated by ACTIVATION_THRESHOLD):
+if baseline is not None and baseline.sample_count >= ACTIVATION_THRESHOLD:
+    stress_threshold = baseline.mean + 1.5 * baseline.stddev
+else:
+    stress_threshold = STRESS_THRESHOLD
+```
+
+The existing `confidence < CONFIDENCE_GATE` suppression is unaffected — it
+applies regardless of activation state.
+
+### Persistence
+
+No changes to `baseline.json` format or `Baseline` dataclass (fields locked §2.6).
+`sample_count` already persists across restarts; the activation gate derives from
+it automatically.
+
+---
+
+## UX Contract for Y.T.
+
+```python
+info = get_activation_info(baseline)
+if info.state == "calibrating":
+    # e.g. "Calibrating (12 / 50 samples)"
+    show_onboarding(info.sample_count, info.samples_needed)
+else:
+    # "Personalized ✓"
+    show_personalized()
+```
+
+`progress` (0.0–1.0) is available for a progress bar or "day N" approximation.
+
+---
+
+## Test Surface
+
+`get_activation_info` and `ACTIVATION_THRESHOLD` are importable and pure — no
+mocking required.  Juanita's acceptance tests can exercise:
+
+- `get_activation_info(None)` → `state="calibrating"`, `sample_count=0`
+- `get_activation_info(Baseline(…, sample_count=49, …))` → `state="calibrating"`
+- `get_activation_info(Baseline(…, sample_count=50, …))` → `state="personalized"`
+- `compute_mood(…, baseline=Baseline(…, sample_count=49, …))` uses `STRESS_THRESHOLD`
+- `compute_mood(…, baseline=Baseline(…, sample_count=50, …))` uses `mean + 1.5σ`
+
+Note: tests use plain pytest classes (not `unittest.TestCase`) for parametrize.
+
+---
+
+## Prior decision cross-reference
+
+The OPEN item in `decisions.md` (2026-06-12, "Baseline Activation Cadence") noted:
+> "Currently, the personal stress threshold engages as soon as a baseline file
+> exists (i.e., `baseline is not None`), with no explicit gate on sample count."
+
+This is resolved.  The Week-2 behavior was non-blocking because "the threshold
+difference is negligible early on" — with few samples and stddev ≈ 0, the personal
+threshold ≈ mean ≈ population mean, and both paths produce nearly identical output.
+The Week-3 gate makes the ARD contract explicit and testable.
+
+
+---
+
+# Week 3 Implementation — SDK Gates & Device Features
+
+**Author:** Ng (SDK Engineer)  
+**Date:** 2026-06-13  
+**Status:** SHIPPED — all four device tasks complete; 128 tests pass  
+**ARD cross-refs:** §5.1 (gate table, state machine), §5.2 (wire format), §10 Q1 & Q3  
+**Scope:** `projects/synesthetic-familiar/device/main.lua` (primary),  
+`projects/synesthetic-familiar/host/sensors.py` (task 5 — already done, see note)
+
+---
+
+## Summary
+
+Four Week 3 device features implemented in `device/main.lua`, all driven by
+gate verdicts in `ng-week3-sdk-gates.md`. Host tests unaffected (128/128 pass).
+
+---
+
+## Task 1 — Double-tap FAMILIAR_RESET
+
+**File:** `device/main.lua` (startup section, ~line 393)
+
+`frame.imu.tap_callback(func)` registered at startup. Double-tap discrimination
+uses a 350ms window accumulator (`TAP_WINDOW_S = 0.35`) with a 40ms hardware
+debounce (`TAP_DEBOUNCE_S = 0.04`, mirrors `RxTap` host-side).
+
+On count ≥ 2:
+- Snap state to NEUTRAL locally (`mood=0, intensity=50, bob_phase=0.0, render_int=50.0`)
+- Cancel any in-flight ATTENTION overlay (`attn_timer=0.0`)
+- Send `string.char(0x01)` — FAMILIAR_RESET opcode confirmed against
+  `familiar_protocol.py: OPCODE_FAMILIAR_RESET = 0x01`
+
+**Contract for Juanita:** device sends exactly 1 byte `0x01` on double-tap.
+`dispatch_device_message(b'\x01')` returns a `FamiliarReset()` instance.
+No payload. Existing golden vectors unaffected.
+
+**Removed:** the `-- frame.imu.on_tap(2, ...)` stub (wrong API name).
+
+---
+
+## Task 2 — ATTENTION-on-IMU-peak
+
+**File:** `device/main.lua` (render loop, after timeout check)
+
+`frame.imu.raw()` polled once per frame (20fps = 50ms max latency).
+Accelerometer magnitude computed from all three axes, scaled by `IMU_SCALE=1000`
+(Halo raw-unit → g, matching `imu.lua` relay).
+
+When `mag > IMU_PEAK_THRESH_G` and not already in ATTENTION:
+- Save current mood to `state.pre_attn_mood`
+- Set `state.mood = 3` (ATTENTION — already in palette + BOB_HZ tables)
+- Start `state.attn_timer = ATTENTION_DURATION_S` (500ms)
+
+Timer countdown in render loop; on expiry, revert to `state.pre_attn_mood`.
+
+**State machine fidelity (ARD §5.1):** ATTENTION does not reset to NEUTRAL —
+it restores whatever mood was active before. Incoming `FAMILIAR_UPDATE` during
+ATTENTION writes to `state.pre_attn_mood` (not `state.mood`) so the revert
+returns the correct host-intended state.
+
+**Tunables (marked for Da5id / hardware calibration):**
+- `IMU_PEAK_THRESH_G = 1.8` — acceleration magnitude threshold (g)
+- `ATTENTION_DURATION_S = 0.5` — overlay duration (500ms, ARD §5.1)
+- `IMU_SCALE = 1000` — raw-unit → g divisor (do not change without firmware evidence)
+
+**Flag to Raven:** accelerometer read path added on-device. Data stays on-device
+(no new BLE characteristic, no new host data). Low privacy surface; confirm no
+additional disclosure needed.
+
+---
+
+## Task 3 — Heap Monitor (GAP-3 fallback)
+
+**File:** `device/main.lua` (`heap_fraction()` function + render loop guard)
+
+`heap_fraction()` manual proxy:
+- Sprite row bytes: `#SPRITE_ROWS * 25` (24 rows × ~25 bytes)
+- BLE buffer max: 244 bytes (max BLE MTU)
+- Budget: `40 * 1024` bytes (conservative app budget)
+
+Current profile: ~844 bytes → fraction ≈ 0.02 (2%). Neither threshold fires
+with current allocation. Pattern is established for future growth.
+
+**Render loop thresholds:**
+- `>= 0.95`: blank screen, set `_halt = true`, `return` from pcall body.
+  Outer `while true` checks `if _halt then break end` after error handler.
+- `>= 0.80`: `skip_glow = true` — suppresses `draw_halo_glow()` call
+  (~3 `frame.display.circle()` calls per frame saved)
+
+**Firmware-swap hook:**
+```lua
+-- TODO(firmware-swap): when frame.system.get_heap_usage() is available:
+--   local u, t = frame.system.get_heap_usage(); return u / t
+```
+Replacing just the body of `heap_fraction()` is sufficient — no other changes.
+
+---
+
+## Task 4 — Halo Glow: Bresenham → `frame.display.circle()`
+
+**File:** `device/main.lua` (`draw_halo_glow()`, ~line 282)
+
+`frame.display.circle(cx, cy, r, ring_color, false)` replaces the 8-call
+mid-point Bresenham loop per ring. Color computation logic unchanged.
+
+Per-ring API calls: 8 `set_pixel()` → 1 `circle()` (8× reduction per ring,
+24× across 3 rings). Frame budget impact: freed ~230 API calls/frame in CALM.
+
+Removed "SDK gap: circle() not confirmed" comment — confirmed in emulator.
+
+---
+
+## Task 5 — Snapshot Zeroing in sensors.py
+
+**Status: Already implemented.** `samples[:] = 0.0` before `del samples` in
+the `finally` block of `_extract_frame()` was present at lines 339–340 from
+the cycle-2 privacy hardening wave (commit 3bb96a3). No edit needed.
+
+---
+
+## Test Results
+
+```
+128 passed in 0.19s  (identical to pre-change baseline)
+```
+
+All host tests exercise `familiar_protocol.py` contracts (opcodes, wire format,
+seq dedup, dispatch). No device Lua tests in the current suite — device behavior
+is validated by the halo_emulator integration path (hardware validation gate,
+ARD §10, Aaron action).
+
+---
+
+## Flags
+
+- **Raven:** Task 2 adds on-device accelerometer read path. No new BLE
+  characteristic. Stays fully on-device. Confirm no additional disclosure.
+- **Lagos:** No new SDK deps. `frame.imu.tap_callback`, `frame.imu.raw()`, and
+  `frame.display.circle()` are all in the existing Halo Lua stdlib.
+- **Da5id:** Three tunables in `device/main.lua` are explicitly marked for your
+  calibration pass: `IMU_PEAK_THRESH_G`, `ATTENTION_DURATION_S`, `IMU_SCALE`.
+  ATTENTION visual (bob speed 1.0 Hz, high-contrast white palette) is already
+  wired — adjust the trigger threshold once you have real device feel.
+
+
+---
+
+# SDK Gate Verdicts — Week 3 Go/No-Go
+
+**Author:** Ng (SDK Engineer)  
+**Date:** 2026-06-12  
+**Status:** RESOLVED — both gates have verdicts; implementation recommendations attached  
+**ARD cross-refs:** §5.1 (gate table), §10 Q1 & Q3  
+**Scope:** Synesthetic Familiar (VESPER), `projects/synesthetic-familiar/`
+
+---
+
+## GATE 1 — IMU Interrupt Callback (ARD §10 Q1)
+
+**Question:** Does the Halo Lua stdlib expose an interrupt-style IMU tap callback
+(`frame.imu.on_tap(n, cb)` or `frame.on_imu_peak`), or is it polling-only?
+
+### Verdict: ✅ GO — primary path (interrupt callback confirmed)
+
+**But the API name is wrong in the ARD and in main.lua.**
+
+### Evidence
+
+Source examined: `brilliantlabsAR/brilliant_sdk` (GitHub, main branch)
+
+1. **`halo_emulator/stubs/imu.py`** — `ImuStub.tap_callback(self, func)` is the
+   Lua-callable stub. The implementation stores the function and fires it on
+   `fire_tap()`. This is the canonical surface the Lua VM sees.
+
+2. **`HaloEmulator.inject_imu_tap()`** dispatches an `"imu_tap"` event which
+   calls `imu.fire_tap()` → invokes the registered Lua callback. Emulator tests
+   rely on this path — it is not a stub omission.
+
+3. **halo_emulator README API listing** (IMU section):
+   > `tap_callback(func)`, `direction()`, `raw()`, `config(options)`
+
+4. **`brilliant_sdk` top-level README** feature matrix:
+   > Tap events — Frame ✓, Halo ✓
+
+### What the ARD got wrong
+
+The ARD §5.1 wrote `frame.imu.on_tap(n, callback)` (with a built-in N-count
+discriminator). **This API does not exist.** The real API is:
+
+```lua
+frame.imu.tap_callback(function()
+    -- fires once per hardware-detected tap
+end)
+```
+
+There is no `n`-count parameter. Double-tap discrimination must be implemented
+in Lua by counting taps within a time window.
+
+### Double-tap on-device (FAMILIAR_RESET)
+
+The callback fires on every hardware tap. To detect a double-tap:
+
+```lua
+local TAP_WINDOW_S = 0.35   -- 350ms window
+local tap_count    = 0
+local tap_last_t   = 0
+
+frame.imu.tap_callback(function()
+    local now = frame.time.utc()
+    if (now - tap_last_t) > TAP_WINDOW_S then
+        tap_count = 0      -- outside window: start new sequence
+    end
+    tap_count  = tap_count + 1
+    tap_last_t = now
+    if tap_count >= 2 then
+        tap_count = 0
+        -- FAMILIAR_RESET: snap to neutral, notify host
+        state.mood, state.intensity, state.bob_phase = 0, 50, 0.0
+        frame.bluetooth.send(string.char(0x01))
+    end
+end)
+```
+
+This is **interrupt-driven** (no polling). Latency = hardware tap detection
+time + Lua callback overhead. Well under 50ms in practice.
+
+### IMU-peak ATTENTION trigger
+
+No `frame.on_imu_peak` primitive exists either. The ATTENTION-on-IMU-peak
+trigger from ARD §5.1 must use `frame.imu.raw()` polled in the render loop.
+At 20fps the loop fires every 50ms — exactly at the ARD's ≤50ms latency target.
+The ATTENTION trigger reads `accel.z` (corrected float32 per ARD §5.1 gotcha)
+and fires when it exceeds a configurable threshold.
+
+### Side finding — `frame.display.circle()` exists
+
+The halo_emulator display API confirms `circle(cx, cy, r, color, filled)` is
+available. The Bresenham mid-point fallback in `draw_halo_glow()` is correct
+but unnecessary — can be replaced with a single `frame.display.circle()` call.
+Not blocking, but worth a cleanup pass before Week 3 merges.
+
+### Action for implementer
+
+1. Replace the commented stub in `device/main.lua` (lines 374–380):
+   - Remove `-- if frame.imu and frame.imu.on_tap then ... end`
+   - Wire `frame.imu.tap_callback(...)` using the debounce pattern above
+2. Add IMU-peak poll in the render loop (read `frame.imu.raw()`, threshold on
+   `accel.z`, transition to ATTENTION state for 500ms)
+3. **Flag to Raven:** ATTENTION state triggered by IMU peak is a new accelerometer
+   data-read path (currently IMU raw is not used in the device loop). No new
+   BLE characteristic needed — purely on-device. Low privacy surface.
+
+---
+
+## GATE 2 — Heap API (ARD §10 Q3)
+
+**Question:** Is `frame.system.get_heap_usage()` (or equivalent) available in
+the current Halo Lua stdlib?
+
+### Verdict: ❌ NO-GO → use fallback as v1 design
+
+### Evidence
+
+Source examined: `brilliantlabsAR/brilliant_sdk` (GitHub, main branch),
+specifically `halo_emulator/stubs/system.py`.
+
+1. **`SystemStub` has no `get_heap_usage` method.** The complete top-level
+   `frame.*` API is: `sleep`, `light_sleep`, `standby`, `yield`, `on_wakeup`,
+   `stay_awake`, `reboot`, `battery_level`, `battery_voltage`,
+   `battery_charging`, `ship_mode`, `charge`, `wakeup_source`, `get_eui`,
+   `get_se_revision`. No heap function.
+
+2. **`frame.system` sub-namespace does not exist.** System-level functions are
+   all top-level `frame.*` calls. There is no `frame.system` table anywhere
+   in the SDK source.
+
+3. The emulator build wires up stubs for every documented `frame.*` namespace.
+   Absence from the stub is strong negative evidence; a real firmware function
+   that wasn't emulated would be a known regression.
+
+### Fallback design (accepted as v1 per ARD §5.1)
+
+Track heap pressure manually at two allocation sites:
+
+```lua
+-- ─── Heap proxy (fallback: no frame.system.get_heap_usage()) ─────────────────
+-- Approximation: sprite row table (24 rows × ~25 bytes) + BLE receive buffer.
+-- Real Halo heap is ~200KB. Effective budget for app data ≈ 40KB (conservative).
+local HEAP_BUDGET_BYTES   = 40 * 1024   -- conservative app budget
+local HEAP_REDUCE_THRESH  = 0.80        -- 80% → reduce quality
+local HEAP_HALT_THRESH    = 0.95        -- 95% → graceful halt
+
+local function heap_used_bytes()
+    -- SPRITE_ROWS: 24 strings, each ~25 bytes = 600 bytes
+    local sprite_bytes = #SPRITE_ROWS * 25
+    -- BLE receive buffer: worst-case 244 bytes (max BLE MTU)
+    local ble_bytes = 244
+    return sprite_bytes + ble_bytes
+end
+
+local function heap_fraction()
+    return heap_used_bytes() / HEAP_BUDGET_BYTES
+end
+```
+
+In the render loop, check `heap_fraction()` per frame:
+- `>= 0.80`: drop halo glow rings (free ~230 set_pixel calls/frame)
+- `>= 0.95`: `frame.display.clear(); frame.bluetooth.send(graceful_halt_msg); break`
+
+This proxy will never actually trigger with current allocation profile
+(sprite + BLE ≈ 844 bytes << 40KB budget). Its main value is establishing
+the instrumentation pattern for future growth.
+
+### Hardware-validation check (flips gate to GO)
+
+If Brilliant adds heap introspection in a future firmware, the flip condition is:
+
+```lua
+-- Hardware validation probe (run once on device, check stdout):
+if type(frame.system) == "table" and
+   type(frame.system.get_heap_usage) == "function" then
+    local used, total = frame.system.get_heap_usage()
+    print("heap ok: " .. used .. "/" .. total)
+else
+    print("heap: no API — using proxy")
+end
+```
+
+When this prints `"heap ok: ..."` on real hardware, delete `heap_used_bytes()`
+and replace `heap_fraction()` with `frame.system.get_heap_usage()` directly.
+
+### Action for implementer
+
+1. Add `heap_fraction()` proxy (pattern above) to `device/main.lua`
+2. Add reduce-quality and graceful-halt checks in the render loop
+3. No new deps needed. No new sensor surface — purely internal bookkeeping.
+
+---
+
+## Summary Table
+
+| Gate | Verdict | Primary path | Fallback | Implementer action |
+|------|---------|-------------|----------|-------------------|
+| IMU interrupt callback | ✅ GO | `frame.imu.tap_callback(func)` — interrupt-driven; Lua debounce for double-tap; IMU-peak via render-loop poll | (not needed) | Replace stub in main.lua; add IMU peak poll; flag Raven re: ATTENTION sensor path |
+| Heap API | ❌ NO-GO → fallback as v1 | — | Manual proxy: sprite rows + BLE MTU bytes; 80%/95% thresholds via `heap_fraction()` | Add `heap_fraction()` + render-loop guard; add hw-validation probe comment |
+
+---
+
+## Flags
+
+- **Raven:** ATTENTION-on-IMU-peak adds an accelerometer read path on-device.
+  No new characteristic. Data stays on-device. Low privacy surface — confirm
+  with Raven that on-device-only accelerometer use requires no additional
+  disclosure.
+- **Lagos:** No new SDK dependencies. `frame.imu.tap_callback` and
+  `frame.imu.raw()` are already in the Halo Lua stdlib. No packages to add.
+
+
+---
+
+# YT — Week 3 Onboarding UX Decision
+
+| Field | Value |
+|-------|-------|
+| **Date** | 2026-06-13 |
+| **Author** | Y.T. (App Developer) |
+| **File** | `projects/synesthetic-familiar/host/main.py` |
+| **Status** | IMPLEMENTED — pending Librarian activation-gate wiring |
+
+---
+
+## Context
+
+Week 3 "It's alive" — Phase-1 final milestone for Synesthetic Familiar (VESPER).
+The host app needed first-launch onboarding UX, calibration-state surfacing,
+fallback visibility, and a harness for the ATTENTION display path.
+
+ARD §5.4 specifies a 3-day baseline ramp-up: population defaults for days 1–3,
+personal mean+1.5σ after. Week 2 (`inference.py`) had no explicit gate; the
+`decisions.md` open item flagged this as blocking Week 3 onboarding.
+
+---
+
+## Decisions Made
+
+### D1 — First-launch detection via `baseline is None`
+Use `load_baseline() → None` as the first-launch signal. No separate flag file
+needed. Rationale: baseline being absent *is* the semantic truth of "not calibrated yet".
+
+### D2 — Calibration status as a pure string function
+`get_calibration_status(baseline: Baseline | None) -> str` is pure, no I/O, testable
+by injecting a `Baseline` dataclass directly. Juanita can unit-test every state without
+touching the filesystem or running a sensor loop.
+
+### D3 — Activation gate call site with TODO-for-Librarian
+Rather than duplicating logic, `get_calibration_status()` dispatches to
+`is_baseline_active(baseline)` from `host.inference` if that export exists,
+falling back to `_approx_baseline_active()` (age ≥ 3 days from `created_at`).
+The `TODO(Week3-Librarian)` comment at the module-level `try/except` marks the
+exact wiring point. No inference.py changes were made (read-only for Y.T.).
+
+### D4 — `print_onboarding()` with injectable `out: TextIO`
+CLI `print()` is fine for playground UX. Injectable `out=io.StringIO()` makes
+the function testable without stdout capture. `run()` calls it with default stdout.
+
+### D5 — Fallback surfacing via `print()` in the run loop
+Both the both-fail (10 s) and confidence-hold (30 s) paths now `print()` a
+`[VESPER]`-prefixed line to stdout in addition to the existing `logger.info()`.
+Logger = machine-readable; print = wearer-readable CLI UX.
+
+### D6 — ATTENTION displayed in `_send_update` when `mood_int == Mood.ATTENTION`
+Single print with `⚡ [VESPER] ATTENTION` prefix. Fires only when mood_int=3 is
+actually sent, so no spurious output from current inference (which never returns
+`attention`). Safe to add now; will fire when Librarian wires ATTENTION into
+`compute_mood` or when `run_mock_cycle` is used.
+
+### D7 — FAMILIAR_RESET surfaces to user in device-message handler
+Added `print("[VESPER] Familiar reset — 'I'm fine' gesture acknowledged")` in
+`_make_device_msg_handler` alongside the existing `logger.info`. The gesture
+acknowledgement is user-facing context, not just dev-log noise.
+
+### D8 — `run_mock_cycle()` for ATTENTION harness testing
+Device-side peak detection is Ng's Lua code. Host piece: a standalone async
+function that cycles NEUTRAL → CALM → STRESSED → ATTENTION, injectable via
+`FakeTransport` and `noop_sleep`. Exposed as `--mock-cycle` / `--mock-cycle-count`
+CLI flags (forces MockTransport; never instantiates SensorStream). Juanita can
+drive it directly from acceptance tests without any CLI invocation.
+
+---
+
+## Deferred / TODOs
+
+- **TODO(Week3-Librarian):** Add `is_baseline_active(baseline: Baseline | None) -> bool`
+  to `host/inference.py` per ARD §5.4. The call site in `get_calibration_status()` is
+  ready; remove the `try/ImportError` guard once the export lands.
+- **ATTENTION in `compute_mood`:** Librarian may wire ATTENTION mood detection in
+  `inference.py`. When that lands, `_send_update`'s ATTENTION print fires on real data.
+- **`--mock-cycle-delay`:** Not added; default 1.0 s is fine for manual testing. Add
+  if acceptance tests need faster cycling.
+
+---
+
+## Test impact
+
+128/128 tests pass. No existing test asserts on stdout content, so the new `print()`
+calls are silent noise in the test run. `print_onboarding`, `get_calibration_status`,
+and `run_mock_cycle` are importable and testable by Juanita without a live loop.

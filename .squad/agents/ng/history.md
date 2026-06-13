@@ -15,6 +15,7 @@
 | 2026-06-09 | Persona-Review Fix Wave | 16 findings fixed (52fbd39); 1 rejected (test churn), 1 escalated (hardware validation) |
 | 2026-06-10 | Polish Wave + Week-2 Logging | 3 minors applied (a9a136e); Week-2 follow-ups documented |
 | 2026-06-10 | Copilot PR Review Fix Wave | 3 comments addressed (e9c8455): bitmap fast-path fallback, inference import-guard fixture, docstring typo |
+| 2026-06-12 | Week 3 SDK Gate Investigation | Gate 1 GO (`frame.imu.tap_callback` confirmed — wrong name in ARD); Gate 2 NO-GO (no heap API — fallback as v1). Decision: ng-week3-sdk-gates.md |
 
 **Full session history archived in `.squad/agents/ng/history-archive.md` (2026-06-02).**
 
@@ -43,11 +44,38 @@
 
 ---
 
+### Week 3 SDK Gate Resolution & Implementation (2026-06-12 to 2026-06-13)
+
+**Gate 1: IMU Interrupt** ✅ GO  
+- ARD API name was incorrect (`frame.imu.on_tap` → actual is `frame.imu.tap_callback`)
+- Double-tap discrimination via Lua debounce (350ms window, 40ms hardware debounce)
+- Opcode 0x01 (FAMILIAR_RESET) wired: snaps device state to NEUTRAL, sends byte
+
+**Gate 2: Heap API** ❌ NO-GO → Fallback as v1  
+- `frame.system.get_heap_usage()` does not exist in current Halo Lua stdlib
+- Manual proxy: sprite rows (24×25 bytes) + BLE MTU (244 bytes) → fraction of 40KB budget
+- Thresholds: 80% = reduce glow, 95% = graceful halt
+- TODO: hardware-swap hook when firmware provides real API
+
+**Device Implementation** (main.lua):
+- Double-tap FAMILIAR_RESET (opcode 0x01) + local state snap to NEUTRAL
+- ATTENTION-on-IMU-peak: IMU.raw() polled at 20fps, magnitude threshold 1.8g, 500ms overlay
+- State machine fidelity: ATTENTION restores pre-attention mood (not NEUTRAL)
+- Halo glow simplified: `frame.display.circle()` replaces Bresenham 8-call loop (8× reduction)
+
+**Test Status:** 128/128 baseline maintained
+
+**Flags to team:**
+- Raven: New accelerometer read path (on-device only, no new BLE characteristic)
+- Lagos: No new SDK deps (all APIs already in Halo stdlib)
+- Da5id: Three tunables marked for calibration (IMU_PEAK_THRESH_G, ATTENTION_DURATION_S, IMU_SCALE)
+
 ## Session Timeline (continued)
 
 | Date | Session | Key Output |
 |------|---------|-----------|
 | 2026-06-10 | Week 2 Sensors + Main Loop | `host/sensors.py` + `host/main.py` real loop shipped; 59 passed, 5 xfailed |
+| 2026-06-13 | Week 3 Device Implementation | double-tap FAMILIAR_RESET, ATTENTION-on-IMU-peak, heap proxy, circle() glow; 128 tests pass |
 
 ---
 
@@ -97,6 +125,89 @@
 - **Import-guard needs enforcing fixture:** an import guard that sets `_IMPORT_ERROR` but has no autouse fixture to call `pytest.fail()` means tests silently collect and then xfail via `NotImplementedError`, masking a genuinely missing/broken module. Pattern: always pair the try/except import block with an `@pytest.fixture(autouse=True)` that calls `pytest.fail(f"... {_IMPORT_ERROR}")` when the error is set. (See test_protocol.py for the canonical shape.)
 - **Negative stddev validation gap:** `math.isfinite(v)` does NOT cover negative values — a negative stddev is finite. Always add `and v >= 0.0` explicitly when the domain is non-negative. Inline comments claiming a check is present are not a substitute for the actual guard. (Reviewer-rejection lockout: Juanita escalated, Ng fixed; commit 5d49a7f.)
 - **Numpy snapshot zeroing:** `del samples` drops the reference but does NOT overwrite the memory — CPython's allocator may reuse the region before the GC collects it, leaving raw audio in freed memory. Always `samples[:] = 0.0` in-place immediately before `del` inside the finally block to satisfy I7 in-memory zeroing. Privacy comments must accurately describe ALL layers: in-buffer zero + snapshot zero + del. (cycle-2 review, commit 3bb96a3)
+
+## Learnings
+
+### Week 3 SDK Gate Investigation (2026-06-12)
+
+**`frame.imu.tap_callback` — correct API name (not `frame.imu.on_tap`)**
+
+The ARD and main.lua both assumed `frame.imu.on_tap(n, callback)` with a
+built-in N-count discriminator. **This API does not exist.** The real API is
+`frame.imu.tap_callback(func)` — confirmed by `halo_emulator/stubs/imu.py`
+(SDK source, brilliantlabsAR/brilliant_sdk main branch). The callback fires
+once per hardware tap; double-tap discrimination requires a Lua debounce
+accumulator (count taps within ~350ms window). Interrupt-driven — not polling.
+
+**IMU peak for ATTENTION trigger: polling only**
+
+No `frame.on_imu_peak` primitive exists. ATTENTION-on-IMU-peak must be
+implemented by reading `frame.imu.raw()` in the render loop and threshold-
+checking `accel.z`. At 20fps the loop fires every 50ms — meets the ARD
+≤50ms latency target. Not a new SDK gap; fits within existing render budget.
+
+**`frame.system` namespace does not exist — heap API NO-GO**
+
+`frame.system.get_heap_usage()` is not available. `frame.system` as a
+sub-namespace does not exist in current Halo firmware or emulator. All system-
+level functions live at the top-level `frame.*`: `sleep`, `battery_level`,
+`reboot`, `wakeup_source`, etc. Heap monitoring requires the manual proxy
+fallback (sprite rows + BLE MTU bytes as a pressure proxy). Thresholds stay
+at 80%/95% per ARD. Gate flips to GO when `frame.system.get_heap_usage()`
+appears in a firmware update — a hardware validation probe is documented in
+`.squad/decisions/inbox/ng-week3-sdk-gates.md`.
+
+**`frame.display.circle()` exists — Bresenham fallback in draw_halo_glow is redundant**
+
+The emulator API listing confirms `frame.display.circle(cx, cy, r, color, filled)`.
+The hand-rolled mid-point Bresenham in `draw_halo_glow()` was written as a
+fallback for an unconfirmed API — it can be replaced with a single
+`frame.display.circle()` call. Existing code is correct but ~8× more verbose.
+
+**SDK architecture: tap events flow device→host via opcode 0x09**
+
+The `tap.lua` stdlib module (device side) calls `frame.bluetooth.send(string.char(0x09))`
+on each tap. `RxTap` on the host side aggregates taps within a 300ms window
+to distinguish single vs. double. For VESPER's on-device FAMILIAR_RESET, we
+bypass the host aggregation entirely — detect double-tap in Lua and send
+the FAMILIAR_RESET opcode (0x01) directly, per the ARD decision (2026-06-08).
+
+---
+
+### Week 3 Implementation Learnings (2026-06-13)
+
+**ATTENTION as overlay requires pre_attn_mood routing in on_ble_data**
+
+The ARD §5.1 state machine says ATTENTION is a transient overlay, not a peer
+state — it reverts to the *previous* state on expiry. This means the BLE
+receive callback must NOT write `state.mood = msg.mood` while `attn_timer > 0`;
+it must write to `state.pre_attn_mood` instead. Forgetting this causes the
+revert to snap to whatever the *last received packet's mood* was rather than the
+mood that was active before the IMU peak triggered.
+
+**_halt flag for graceful loop exit from inside pcall**
+
+`break` inside a `pcall` body only exits the pcall function, not the enclosing
+`while true`. Pattern: set a module-upvalue `_halt = true` inside the pcall
+body, return cleanly, then check `if _halt then break end` *after* the pcall
+error handler in the outer loop. This preserves the error-handler path and exits
+cleanly without double-running error recovery.
+
+**frame.imu.tap_callback vs frame.imu.on_tap(n,cb) — API name matters**
+
+The ARD-assumed `frame.imu.on_tap(2, cb)` with built-in N-count parameter does
+not exist. The real API fires once per hardware tap with no count arg. Always
+verify API signatures against emulator stub source before writing Lua stubs,
+not just against high-level documentation or architectural notes.
+
+**Snapshot zeroing in sensors.py was already done — check before editing**
+
+A task instructed "add `samples[:] = 0.0` before `del samples`" — but it was
+already present from the cycle-2 privacy hardening pass (commit 3bb96a3).
+Pre-flight: grep for the exact pattern before making a targeted edit to avoid
+a no-op diff or a confusing duplicate.
+
+---
 
 ### Week 2 Review-Fix Wave Learnings (2026-06-12)
 
