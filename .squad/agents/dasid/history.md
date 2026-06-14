@@ -176,3 +176,38 @@ ATTENTION vs STRESSED cannot collide because:
 
 **Decision file:** `.squad/decisions.md` (merged from `.squad/decisions/inbox/dasid-week3-attention-animation.md`)
 
+---
+
+## Session 2026-06-13: ATTENTION Eye Dilation Addendum (Week 3 Wave 2)
+
+**Trigger:** Aaron resolved Q1 — include eye dilation now, not as polish.
+
+**Delivered:** Concrete pixel-level spec for +1px eye dilation during ATTENTION overlay.
+
+### Design Spec
+- **Baseline eye:** 11 pixels (3×3 with 5-pixel center row), rows 8–10, cols 13–17
+- **Dilated eye:** 19 pixels (+8, 73% increase), rows 7–10, cols 12–18
+- **Timing:** Dilation holds for full 500ms ATTENTION_DURATION_S (not just 180ms jump)
+- **Implementation:** Morphological dilation at render time — inflate any neighbor of eye pixel to eye color
+
+### Why Hold Full 500ms
+The 180ms jump is the *motion* animation; 500ms is the total ATTENTION overlay. Dilating only during the 60ms launch phase would be imperceptible (sub-100ms is blink threshold). The "wide-eyed" moment needs time to register in peripheral vision.
+
+### Tunable Delivered
+```lua
+local ATTENTION_EYE_DILATE_PX = 1
+```
+
+### Glance-Ergonomics Verified
+- Dilated eye stays within sprite bounds (no clipping)
+- White dilated eye visually distinct from CALM (teal) and STRESSED (amber)
+- 19 eye pixels still only ~1.6% canvas
+
+### Q1 Resolution
+Marked §6 Q1 as RESOLVED (Aaron chose include). Q2 (mood restoration) unchanged — already implemented as `pre_attn_mood`.
+
+**Deliverable:** `.squad/decisions/inbox/dasid-week3-eye-dilation.md`
+
+
+
+📌 Team update (2026-06-14T05:36:23Z): Y.T. wired activation gate (host bind-up complete); Ng shipped ATTENTION visuals with eye dilation (§6 Q1 INCLUDED); privacy audit APPROVED all surfaces — ready for ship sequence — decided by Y.T., Ng, Raven

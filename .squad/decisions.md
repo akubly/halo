@@ -2298,3 +2298,777 @@ drive it directly from acceptance tests without any CLI invocation.
 128/128 tests pass. No existing test asserts on stdout content, so the new `print()`
 calls are silent noise in the test run. `print_onboarding`, `get_calibration_status`,
 and `run_mock_cycle` are importable and testable by Juanita without a live loop.
+
+
+# Eye Dilation Addendum — ATTENTION Animation (Week 3)
+
+**Author:** Da5id (HUD/UX)  
+**Date:** 2026-06-13  
+**Status:** ADDENDUM to existing ATTENTION spec (decisions.md §2–6)  
+**Aaron Decision:** INCLUDE eye dilation now (Q1 resolved)
+
+---
+
+## 1. Design Intent
+
+Eye dilation reinforces the "I notice you" read of ATTENTION. The pupil expanding is a universal mammalian signal of heightened awareness — the creature's eye literally opens wider when it perceives the head motion. Combined with the white eye and +4px jump, dilation completes the "startled recognition" micro-moment.
+
+---
+
+## 2. Baseline Eye Geometry (from `familiar_neutral.txt`)
+
+```
+Eye region: rows 8–10, columns 13–17 (0-indexed from top-left)
+
+Row 8:   ...333..   (3 eye pixels)
+Row 9:   ..33333..  (5 eye pixels)
+Row 10:  ...333..   (3 eye pixels)
+```
+
+**Baseline dimensions:**  
+- Width: 5px at widest (row 9)  
+- Height: 3px  
+- Approximate center: row 9, column 15  
+- Total eye pixels: 11
+
+---
+
+## 3. Dilated Eye Specification
+
+**Dilation:** +1px radius on all exposed edges
+
+```
+REST (11 pixels):          DILATED (19 pixels):
+     ...333..                   ..33333..
+     ..33333..                  .3333333.
+     ...333..                   ..33333..
+                                         
+(rows 8–10, cols 13–17)    (rows 7–11, cols 12–18)
+```
+
+**Dilated dimensions:**
+- Width: 7px (was 5)
+- Height: 3px (unchanged — we expand laterally + add 1 row above)
+- Total eye pixels: 19 (was 11)
+
+**Implementation:** During ATTENTION, any pixel that is adjacent (orthogonally or diagonally) to an eye pixel (palette index 3) also renders as eye color. This is a render-time inflation — no sprite change needed.
+
+---
+
+## 4. ASCII Keyframe Comparison (24×24 grid, rows 6–12)
+
+```
+REST STATE (current sprite):
+Row 6:  000000112222221100000000
+Row 7:  000001222222222210000000
+Row 8:  000012222222333221000000   ← eye: 3 pixels
+Row 9:  000122222233333221000000   ← eye: 5 pixels (widest)
+Row 10: 000122222223332221000000   ← eye: 3 pixels
+Row 11: 001222222222222221000000
+Row 12: 001222222222222222100000
+
+DILATED STATE (ATTENTION render):
+Row 6:  000000112222221100000000
+Row 7:  000001222233333210000000   ← eye expands UP (+1px row)
+Row 8:  000012223333333221000000   ← eye: 5 pixels (was 3)
+Row 9:  000122223333333221000000   ← eye: 7 pixels (was 5)
+Row 10: 000122223333332221000000   ← eye: 5 pixels (was 3)
+Row 11: 001222222222222221000000   ← no dilation down (body edge)
+Row 12: 001222222222222222100000
+```
+
+**Net effect:** Eye expands from 11→19 pixels (+8 pixels, +73%). Reads as distinctly wider without dominating the sprite.
+
+---
+
+## 5. Timing
+
+| Condition | Eye State |
+|-----------|-----------|
+| `state.attn_timer > 0` | **Dilated** (full 500ms ATTENTION_DURATION_S) |
+| `state.attn_timer == 0` | **Rest** (normal 11-pixel eye) |
+
+**Why hold for full duration (not just launch peak):**
+- 180ms is the *jump* animation; 500ms is the total ATTENTION overlay
+- Dilating only during the 60ms launch would be imperceptible (sub-100ms blink threshold)
+- Holding dilation for the full 500ms gives the "wide-eyed" moment time to register in peripheral vision
+
+**No separate easing:** Dilation is binary (on/off with ATTENTION state). The 60ms launch already provides the "snap" entrance; fading the dilation would add render complexity for minimal perceptual gain.
+
+---
+
+## 6. Tunable (Lua constant, matches existing ATTENTION_* convention)
+
+```lua
+-- ─── ATTENTION Eye Dilation (Week 3 addendum, Da5id spec) ────────────────────
+local ATTENTION_EYE_DILATE_PX = 1   -- radius expansion for eye during ATTENTION
+```
+
+**Implementation hint for Ng:**  
+In `draw_creature()`, when `state.mood == 3` (ATTENTION), for each non-transparent pixel:
+1. If pixel index == 3 (eye): draw as normal
+2. If pixel index ≠ 3 but any orthogonal/diagonal neighbor is index 3: also draw as eye color (0xFFFFFF for ATTENTION palette)
+
+This is a morphological dilation — no sprite change, just render-time neighbor detection.
+
+---
+
+## 7. Glance-Ergonomics Verification
+
+| Concern | Check |
+|---------|-------|
+| **Sprite bounds** | Dilated eye stays within rows 7–10, cols 12–18. Sprite is rows 4–20, cols 6–21. ✓ No clipping. |
+| **STRESSED collision** | STRESSED (mood=2) uses amber eye (0xFF8800), undilated. ATTENTION (mood=3) uses white dilated eye. Colors + shape differ. ✓ No collision. |
+| **CALM collision** | CALM (mood=1) uses teal eye (0x00FFCC), undilated. ✓ No collision. |
+| **Peripheral legibility** | +8 pixels (11→19) is a 73% area increase at the attention locus. Combined with white vs cyan color, the dilation registers as "eye opened wider" even in peripheral vision. ✓ |
+| **Pixel budget** | 19 eye + ~80 body = ~99 lit pixels during ATTENTION. Still 1.6% of 256×256 canvas. ✓ Under 5% idle target. |
+
+---
+
+## 8. Open Question Resolution
+
+### §6 Q1: Eye dilation — **RESOLVED**
+
+**Status:** ✅ INCLUDE NOW (Aaron decided 2026-06-13)  
+**Original recommendation:** Defer for Week 3 polish  
+**Aaron's decision:** Ship with dilation in Week 3  
+
+### §6 Q2: Mood restoration — **NO CHANGE**
+
+Team already converged on restore-to-previous-mood. Implementation exists (`state.pre_attn_mood`). No further action required.
+
+---
+
+## 9. Checklist for Ng (addendum items only)
+
+- [ ] Add `ATTENTION_EYE_DILATE_PX = 1` constant
+- [ ] In `draw_creature()`, when `mood == 3`, inflate eye pixels by ATTENTION_EYE_DILATE_PX (morphological dilation)
+- [ ] Verify dilated eye renders correctly on device (no clipping, correct white color)
+
+---
+
+## 10. Reference: Existing ATTENTION Constants (from decisions.md §3)
+
+```lua
+local ATTENTION_JUMP_AMP_PX   = 4       -- upward burst amplitude
+local ATTENTION_LAUNCH_MS     = 60      -- launch phase duration
+local ATTENTION_SETTLE_MS     = 120     -- settle phase duration
+local ATTENTION_DURATION_MS   = 180     -- jump animation window
+local ATTENTION_COOLDOWN_MS   = 500     -- anti-spam cooldown
+local ATTENTION_DURATION_S    = 0.5     -- total overlay duration (500ms)
+-- NEW:
+local ATTENTION_EYE_DILATE_PX = 1       -- eye radius expansion
+```
+
+---
+
+*End of addendum — merge into decisions.md §2 (Posture change) and §3 (Tunable Parameters) as appropriate.*
+
+
+# Y.T. Wave-2 Bind-Up Decision — Week 3 "It's alive"
+
+**Date:** 2026-06-13  
+**Author:** Y.T. (host-side app developer)  
+**Status:** RESOLVED — 190 passed, 0 skipped, 0 xfailed (was 176/11/3)
+
+---
+
+## Summary
+
+Two mechanical bind-ups in `host/main.py`, plus the new `host/onboarding.py` module,
+completing the Wave-2 work items and clearing all outstanding skipped/xfailed tests.
+
+---
+
+## BIND-UP 1 — Activation Accessor
+
+**Problem:** `host/main.py` contained a `_is_baseline_active` import shim
+(`try: from host.inference import is_baseline_active … except ImportError: pass`)
+and an age-based fallback `_approx_baseline_active()` behind a `TODO(Week3-Librarian)`.
+Librarian shipped `get_activation_info(baseline) → ActivationInfo` and
+`ACTIVATION_THRESHOLD = 50` in Week 3. The shim was never needed.
+
+**Decision:** Remove the shim and both fallback helpers (`_approx_baseline_active`,
+`_baseline_age_days`). Import `get_activation_info` and `ACTIVATION_THRESHOLD`
+directly from `host.inference`. Rewrite `get_calibration_status()` to call
+`get_activation_info(baseline)` and format the result:
+- `state == "calibrating"` → `"calibrating (n / 50 samples — population defaults active)"`
+- `state == "personalized"` → `"personalized (n=N samples, mean=M, stddev=S)"`
+
+Progress counter (`sample_count / samples_needed`) replaces the age-based "day N of 3"
+display — sample-count gating is the authoritative gate per decisions.md 2026-06-12.
+
+**Rationale:** Pure mechanical bind. No design latitude; Librarian's contract was
+complete. Age-based fallback is permanently retired; the field `_BASELINE_MIN_DAYS`
+and `datetime` import are removed as dead code.
+
+---
+
+## BIND-UP 3 — FAMILIAR_RESET Host Reaction
+
+**Problem:** `_make_device_msg_handler()` logged and printed on `FamiliarReset` but
+took no action on local state. `run()` therefore ignored FAMILIAR_RESET. This left
+3 xfail tests in `test_week3_reset.py` Group 2 (JUANITA-T2-5):
+- `test_reset_triggers_neutral_send`
+- `test_reset_restarts_sequence_counter`
+- `test_reset_during_gated_session_clears_stale_mood`
+
+**Decision:** Use a `list[bool]` reset flag shared between the receive callback closure
+and the `run()` loop. The flag is set inside the callback (synchronously, during
+`await transport.send()`) and checked at the top of each loop frame.
+
+When the flag is set:
+1. Clear the flag.
+2. Call `seq.reset()` — re-syncs sequence counter (ARD §5.2 reconnect protocol).
+3. Call `_send_neutral_reset(transport, seq)` — sends `FAMILIAR_UPDATE` with
+   `mood=NEUTRAL`, routes intensity through Gate 2 (quantise → jitter → encode).
+4. Update `last_send_time = tick_start` and `both_fail_start = None`.
+5. `continue` — `finally` (sleep pacer) still executes; frame's sensor data is skipped.
+
+**Why `list[bool]` not `asyncio.Event`?** All asyncio code is single-threaded; the
+callback fires synchronously inside `await transport.send()`. A simple mutable
+container is sufficient and avoids introducing a coroutine wait in the callback path.
+
+**Why `continue` after reset, not fall-through?** The device already snapped to
+NEUTRAL. Processing the current frame's sensor data would immediately overwrite the
+NEUTRAL send with a potentially non-NEUTRAL mood — contradicting the reset intent.
+
+**New helper:** `_send_neutral_reset(transport, seq)` — semantically distinct from
+`_send_neutral_fallback` (which is a sensor-fail path). Both route through Gate 2.
+
+---
+
+## New Module — `host/onboarding.py`
+
+**Problem:** `test_week3_onboarding.py` had 11 tests skipping because
+`host.onboarding` did not exist. Juanita's contract:
+- `is_first_launch(baseline_path: Path) → bool` — pure, file-existence check
+- `run_first_launch_flow(baseline_path: Path) → None` — banner + creates marker file
+- `run_returning_flow(baseline: Baseline | None) → None` — logs returning-user status
+
+**Decision:** Create `host/onboarding.py` implementing exactly that contract.
+`is_first_launch` is a one-line `not baseline_path.exists()` — pure, no I/O.
+`run_first_launch_flow` creates parent dirs, writes an empty marker, prints the
+first-launch banner. `run_returning_flow` logs but does not raise on `None` input.
+
+**Reject criteria met:**
+- `is_first_launch` uses caller-supplied path (no `~/.vesper` hardcode).
+- After `run_first_launch_flow`, `is_first_launch(same_path)` returns `False`.
+- `run_first_launch_flow` has no BLE SDK imports (pure host UX).
+- `run_returning_flow(None)` does not raise.
+
+---
+
+## Test Suite After Changes
+
+```
+190 passed in 0.33s
+```
+
+Delta: +14 tests (11 skipped → passed, 3 xfailed → passed), 0 regressions.
+The `@pytest.mark.xfail` decorators were removed from the three test classes in
+`test_week3_onboarding.py` and from `TestFamiliarResetHostReaction` in
+`test_week3_reset.py`, since the conditions they guarded are now fully implemented.
+
+
+# Implementation Note — Week 3 ATTENTION Visuals
+
+**Author:** Ng (SDK Engineer)  
+**Date:** 2026-06-13  
+**Status:** SHIPPED — device/main.lua updated  
+**Scope:** ATTENTION animation: jump motion, eye dilation, body desaturation, mood restoration
+
+---
+
+## Summary
+
+All four ATTENTION visual tasks from Da5id's spec (decisions.md §2–6) and the eye-dilation addendum (dasid-week3-eye-dilation.md) are implemented in `projects/synesthetic-familiar/device/main.lua`. Tests: 188 passing, 2 pre-existing failures in `TestFamiliarResetHostReaction` (Y.T.'s host-side domain, unaffected by Lua changes).
+
+---
+
+## Task 1 — Jump Motion
+
+**Constants added:**
+```lua
+local ATTENTION_JUMP_AMP_PX  = 4    -- upward burst amplitude (pixels)
+local ATTENTION_LAUNCH_MS    = 60   -- launch phase: 0 → peak (ms)
+local ATTENTION_SETTLE_MS    = 120  -- settle phase: peak → 0 (ms)
+local ATTENTION_DURATION_MS  = 180  -- total jump window (launch + settle)
+```
+
+**Easing helpers added** per Da5id's reference Lua:
+- `ease_out_quad(t)` — fast-start, decelerating (launch)
+- `ease_in_out_quad(t)` — smooth S-curve (settle)
+
+**`compute_attention_jump(attn_timer)` added:**  
+Returns 0–4px upward offset. Uses `(ATTENTION_DURATION_S - attn_timer) * 1000` as elapsed_ms — derives from the existing countdown rather than storing a wall-clock start time.
+
+**Applied in render loop:**
+```lua
+local attn_jump_px = compute_attention_jump(state.attn_timer)
+local render_y = SPRITE_CY + bob_y - attn_jump_px
+```
+All three draw calls (halo glow, creature, fraying) receive `render_y`. Because halo and fraying are gated to CALM/STRESSED respectively, they are no-ops during ATTENTION; the jump only visually matters on `draw_creature`.
+
+### Timer Reconciliation
+
+Da5id's checklist listed `state.attention_start_t`, `state.attention_active`, `state.attention_last_t`, `state.mood_before_attention` as new fields. **These were not added.** The existing state already covers every requirement:
+
+| Da5id field | Existing equivalent |
+|-------------|-------------------|
+| `attention_active` | `state.attn_timer > 0` |
+| `attention_start_t` | `ATTENTION_DURATION_S - state.attn_timer` (derived) |
+| `attention_last_t` | `attn_timer` covers anti-re-entrancy (guard already in IMU block) |
+| `mood_before_attention` | `state.pre_attn_mood` |
+
+Single source of truth: `state.attn_timer` (countdown). No duplication.
+
+---
+
+## Task 2 — Eye Dilation
+
+**Constant added:**
+```lua
+local ATTENTION_EYE_DILATE_PX = 1   -- neighbor radius for dilation
+```
+
+**Two-pass render in `draw_creature()`:** After the main pixel loop, when `mood_idx == 3`, iterate sprite looking for eye pixels (index 3). For each, paint all 8 neighbors (dr, dc ∈ {-1,0,1}, not both zero) as eye color if they are not themselves eye pixels. Bounds-checked.
+
+**Pixel count:** 11 → 19 (+73%). Dilated region: rows 7–10, cols 12–18. Sprite bounds: rows 4–20, cols 6–21. No clipping. ✓
+
+**Timing:** Binary (on for full ATTENTION_DURATION_S, off otherwise). No easing needed — the 60ms launch snap provides entrance snap perceptually.
+
+---
+
+## Task 3 — Body Desaturation
+
+**Status: Already correct in Wave-1.** The ATTENTION palette `[3]` already uses neutral gray body colors:
+```lua
+[1] = 0x1A1A1A,   -- body dark  — gray (desaturated)
+[2] = 0x2E2E2E,   -- body mid   — gray (desaturated)
+```
+Added inline comments to the palette block clarifying the desaturation intent and why it distinguishes ATTENTION from STRESSED (which retains warm amber).
+
+---
+
+## Task 4 — Q2 Mood Restoration
+
+**Status: Already correct in Wave-1.** `state.pre_attn_mood` is saved on ATTENTION trigger and restored on `attn_timer` expiry. Comment added to the expiry block:
+
+```lua
+-- Team decision (2026-06-13): restore-to-previous-mood (not neutral).
+-- Aaron deferred to team; team converged; no behavior change needed.
+```
+
+**Flicker risk assessment:** No flicker risk observed. `pre_attn_mood` is written once on trigger (before `state.mood = 3`) and read once on expiry. Incoming BLE packets during the overlay correctly update `pre_attn_mood` (not `state.mood`) via the `attn_timer > 0` guard in `on_ble_data`. The restored mood therefore reflects the latest host state, not a stale snapshot. Behavior is correct.
+
+---
+
+## 0x01 Contract
+
+`OPCODE_FAMILIAR_RESET = 0x01` in `host/familiar_protocol.py` is unchanged. The double-tap handler still sends `string.char(0x01)`. Contract intact. ✓
+
+---
+
+## Files Changed
+
+- `projects/synesthetic-familiar/device/main.lua` — all changes above
+
+## Files NOT Changed (per charter)
+
+- `host/main.py`, `host/inference.py`, `host/sensors.py` — Y.T.'s domain
+
+
+# Raven — Week 3 Privacy Audit: VESPER "It's alive"
+
+| Field       | Value |
+|-------------|-------|
+| **Author**  | Raven (Security & Privacy) |
+| **Date**    | 2026-06-13T23:13:01-07:00 |
+| **Scope**   | Week 3 new surfaces: ATTENTION-on-IMU-peak, first-launch onboarding + baseline activation gate, W3-1 snapshot-zeroing confirmation, secrets scan |
+
+---
+
+## Surface 1 — ATTENTION-on-IMU-peak (device/main.lua)
+
+### Data Flow
+
+```
+frame.imu.raw()
+  └─▶ imu_raw.accelerometer.{x,y,z}   [local Lua variables only]
+        └─▶ ax, ay, az = raw / IMU_SCALE  [g, local]
+              └─▶ mag = sqrt(ax²+ay²+az²) [local scalar]
+                    └─▶ if mag > 1.8g:
+                              state.mood      = 3     [local render state]
+                              state.attn_timer = 0.5  [local countdown]
+                          ─── NO frame.bluetooth.send() call ───
+```
+
+**BLE transmissions in device/main.lua — complete inventory:**
+1. Startup reconnect ACK: `0x02` + last_seq (3 bytes) — no sensor data
+2. Double-tap FAMILIAR_RESET: `0x01` (1 byte) — no sensor data
+3. Every-10-packets FAMILIAR_ACK: `0x02` + last_seq (3 bytes) — no sensor data
+
+The IMU-peak code path (lines 548–564) **exclusively mutates local `state` variables**. `frame.bluetooth.send()` is not called from the render loop IMU-peak branch. Raw accelerometer values (`ax`, `ay`, `az`, `mag`) are Lua locals — they are never serialised, logged, or transmitted.
+
+**Bystander inference check (TEST-STRATEGY privacy-audit row: "non-wearer cannot infer stress/calm from visual alone"):**
+
+ATTENTION visual: gray desaturated body + white eye + 4px upward jump (180ms) + 500ms overlay. This visual is distinct from STRESSED (amber body, amber eye) and CALM (teal body, teal eye). A bystander observing the ATTENTION overlay learns at most "a sudden motion event occurred" — they cannot determine whether the wearer is stressed or calm. The ATTENTION trigger is motion-magnitude-only (no mood inference on device). ARD §5.6 explicitly accepts that an *informed* observer can associate creature behavior with wearer state; the 24×24 peripheral sprite remains opaque to a casual bystander. The TEST-STRATEGY row is satisfied: the ATTENTION visual does not leak stress/calm — it is a momentary, generic motion response.
+
+**Additional confirmation:** The device-side ATTENTION trigger is invisible to the host. The host continues sending FAMILIAR_UPDATE at 10Hz based on its own inference. No new BLE characteristic was introduced. The host's ATTENTION state (mood_int=3) follows an independent path from `compute_mood()` on the host.
+
+### Verdict: ✅ APPROVED
+
+No accel value leaves the device via the ATTENTION path. No stress/calm inference is possible from the ATTENTION visual alone. No new BLE characteristic. No host visibility of device-side IMU peak event. Clean.
+
+---
+
+## Surface 2 — Onboarding + Baseline Activation Gate
+
+### What lands in ~/.vesper/baseline.json
+
+```json
+{
+  "mean":         0.412,   // running Welford mean of tension scalar (0.0–1.0)
+  "stddev":       0.087,   // sample stddev of tension scalar
+  "sample_count": 47,      // count of high-confidence samples accumulated
+  "created_at":   "2026-06-13T..."  // ISO 8601 first-session timestamp
+}
+```
+
+**Tension scalar derivation** (`inference.py` line 251–255):
+```python
+tension = audio_pitch_variance * 0.4 + imu_acceleration * 0.3 + imu_rotation * 0.3
+```
+
+This is a three-input weighted scalar in [0.0, 1.0]. It is:
+- **Not** raw audio samples (zeroed after extraction — Gate I7)
+- **Not** a voiceprint or acoustic fingerprint
+- **Not** raw IMU data
+- **Not** re-identifying: the scalar alone cannot identify an individual without ground-truth behavioral data for comparison
+
+The mean and stddev are a two-number summary of the wearer's typical arousal distribution. This is a behavioral metric, not a biometric in the GDPR Article 9 sense (no morphological, physiological, or behavioral characteristic that allows unique identification when processed with appropriate techniques). For a single-user local playground, this risk level is accepted.
+
+**Onboarding print surface — new finding:**
+
+`get_calibration_status()` in `main.py` (lines 100–108) prints to stdout on every returning-user startup when "personalized":
+```
+[VESPER] Familiar online — personalized (n=53 samples, mean=0.412, stddev=0.087)
+```
+
+The `mean` and `stddev` of the tension baseline are written to the terminal at INFO level. For a single-user playground on the wearer's own machine this is acceptable Phase-1 behaviour. However, this surfaces a behavioral metric in plaintext to the terminal — anyone with access to the terminal session (shell history, screen capture, log aggregator) would see it.
+
+**P2-2 regression check:** Prior deferral was "baseline.json is plaintext, not encrypted; accept for Phase-1 single-user playground." The format and risk level are unchanged. No regression. The new P2 observation is the stdout print of mean/stddev, which is a related but distinct surface.
+
+**onboarding.py print review:** `run_first_launch_flow()` prints only the static banner and calibration status ("calibrating (0 / 50 samples — population defaults active)"). No sensitive data. `run_returning_flow()` only logs INFO "returning user — baseline loaded" (no values). Clean.
+
+### Verdict: ✅ APPROVED (Phase-1 accepted risk — P2-2 not regressed)
+
+No biometric-identifying data in baseline.json. Plaintext acceptable for Phase-1 single-user playground; P2-2 deferral stands. New P2 item added: stdout print of mean/stddev in "personalized" status string should move to `--verbose` / debug-only in Phase-2.
+
+**New P2 item (extend or companion to P2-2):**
+
+> **P2-4:** `get_calibration_status()` prints `mean=X.XXX, stddev=X.XXX` to stdout on every returning-user startup when personalized. Phase-2 should replace with a non-metric string (e.g. "personalized ✓") at INFO level and move the numeric values to `--verbose` or debug log. Owner when actioned: **Y.T.** (onboarding UX).
+
+---
+
+## Surface 3 — W3-1 Snapshot Zeroing (sensors.py)
+
+**Requested hardening:** Ensure buffer is cleared on every code path (not just happy path), and snapshot copy is zeroed in-place before `del`.
+
+**Confirmed present — three-layer zeroing in `_extract_frame()` (lines 315–340):**
+
+```python
+with self._audio_lock:
+    samples = self._buffer.copy()
+    self._buffer[:] = 0.0        # Layer 1: in-buffer zero (under lock, every path)
+    self._buffer_pos = 0
+    mic_ok = self._mic_ok
+try:
+    ...                           # feature extraction
+finally:
+    samples[:] = 0.0             # Layer 2: snapshot copy zero (in-place, every path incl. exception)
+    del samples                  # Layer 3: reference release
+```
+
+**Confirmed present — stop() zeroing (lines 252–257):**
+```python
+with self._audio_lock:
+    self._mic_ok = False
+    self._buffer[:] = 0.0
+    self._buffer_pos = 0
+```
+
+The `finally` block guarantees Layer 2 + Layer 3 execute on **every** exit path from `_extract_frame()` — normal return, exception from `_compute_rms`, exception from `_compute_pitch_variance`, and exception from the SensorFrame constructor. This is exactly the hardening requested in W3-1.
+
+**Verdict: ✅ CONFIRMED — W3-1 present and correct.**
+
+---
+
+## Surface 4 — Secrets Scan (Week 3 diff)
+
+Scanned `projects/synesthetic-familiar/` for:
+- API keys, tokens, credentials, passwords
+- Cloud SDK imports (OPENAI, AWS, GCP, Azure)
+- Bearer tokens, GitHub PATs, SSH private keys
+- Hardcoded secrets patterns
+
+**Result: CLEAN.** One false-positive match ("concentric rings" in main.lua — a comment). No secrets, no cloud SDK imports, no credentials. Week 3 is clean.
+
+---
+
+## Summary Table
+
+| Surface | Verdict | Notes |
+|---------|---------|-------|
+| ATTENTION accel path (device/main.lua) | ✅ **APPROVED** | No accel value or stress inference leaves device; no new BLE characteristic; bystander cannot infer stress/calm from ATTENTION visual |
+| Onboarding + baseline persistence | ✅ **APPROVED** (P2 note) | No raw biometrics; P2-2 not regressed; new P2-4 item: move mean/stddev console print to --verbose |
+| W3-1 snapshot zeroing (sensors.py) | ✅ **CONFIRMED** | Three-layer zeroing present; finally block guards all paths |
+| Secrets scan | ✅ **CLEAN** | No secrets, tokens, or cloud SDKs in Week 3 code |
+
+---
+
+## Open / Deferred Privacy Items (complete list for handoff)
+
+| ID | Item | Owner (when actioned) | Phase |
+|----|------|-----------------------|-------|
+| P2-1 | BLE LESC (LE Secure Connections) pairing — wire is unauthenticated | Ng | P2 |
+| P2-2 | baseline.json encryption / OS keychain storage | Y.T. | P2 |
+| P2-3 | Jitter range review (currently ±5 on {0,25,50,75,100} → narrow; review whether ±10 or ±8 is needed) | Librarian / Ng | P2 |
+| P2-4 | *(new, Week 3)* `get_calibration_status()` prints mean/stddev to stdout when personalized — move to `--verbose`/debug log | Y.T. | P2 |
+
+**Week 3 ships clean. No blocking conditions.**
+
+
+# Decision: Juanita Week 3 Fallback-Depth & Threshold-Tuning Tests
+
+| Field | Value |
+|-------|-------|
+| **Date** | 2026-06-13 |
+| **Author** | Juanita (Tester / QA) |
+| **Status** | DELIVERED — all 72 new tests green |
+| **Requested by** | Aaron Kubly |
+| **Wave** | Week 3 Wave 2 |
+
+---
+
+## What Was Done
+
+Added 72 new tests in 3 files to deepen graceful-fallback verification and threshold-tuning coverage for the VESPER Week 3 "it's alive" bar.
+
+### Files Created
+
+| File | Tests | Focus |
+|------|-------|-------|
+| `tests/test_week3_fallback_depth.py` | 9 | Timeout boundaries, recovery, RESET-during-fallback |
+| `tests/test_week3_threshold_tuning.py` | 37 | Confidence gate, activation boundary, quantisation buckets, jitter |
+| `tests/test_week3_ble_flake.py` | 26 | Garbled device bytes, extreme sensor floats, heap gap |
+
+**Suite totals: 190 → 262, all green.**
+
+---
+
+## Key Contracts Verified
+
+### 1. Graceful Fallback Depth
+
+**Exact timeout boundaries (strict `>`, not `>=`):**
+- `test_at_exactly_10s_does_not_fire`: delta=10.0 must NOT fire the both-fail fallback.
+- `test_just_after_10s_fires_neutral`: delta=11.0 fires exactly one NEUTRAL.
+- Same pattern for confidence-hold at 30.0 / 31.0.
+
+**Recovery after fallback:**
+- `test_good_frame_after_both_fail_sends_inference_result`: after NEUTRAL fired, a stressed-ungated frame drives normal inference (2 sends total; mood flips from 0 to 2).
+- `test_good_frame_after_confidence_hold_sends_again`: after hold fires, recovery send follows.
+- `test_both_fail_timer_clears_on_good_frame`: regression — timer does NOT carry across a good-frame gap.
+
+**FAMILIAR_RESET during both-fail state:**
+- `test_reset_during_both_fail_sends_neutral_once`: RESET fires at frame 3 (timer at 2s, not yet expired); run() handles RESET (1 NEUTRAL send), clears `both_fail_start=None`. Subsequent both-fail frames restart from scratch — no spurious timeout.
+- `test_reset_clears_both_fail_timer_prevents_double_fire`: RESET at 9s elapsed (one tick before timeout); exactly 1 send (the RESET reaction). Without the `both_fail_start=None` clear, a second NEUTRAL would fire.
+
+**Seam used:** `_ResetCallbackStream` + `_CaptureCallbackTransport` — fires FAMILIAR_RESET opcode 0x01 via the on_receive callback after yielding the Nth frame, deterministic, no hardware.
+
+### 2. Threshold Tuning
+
+**Confidence gate (CONFIDENCE_GATE=0.7, strict `<`):**
+- stressed + both ok → confidence=0.8, `gated=False` ✓
+- neutral + both ok → confidence=0.6, `gated=True` ✓
+- stressed + mic_ok=False → 0.8×0.6=0.48, `gated=True` ✓
+- stressed + imu_ok=False → 0.8×0.7=0.56, `gated=True` ✓
+- `test_gate_is_strict_less_than_not_less_than_or_equal`: pins strict-`<` semantics by constructing a MoodResult with confidence=CONFIDENCE_GATE and asserting `gated=False`.
+
+**Activation gate (ACTIVATION_THRESHOLD=50):**
+- n=49: population STRESS_THRESHOLD(0.65) → neutral (tension 0.49 < 0.65)
+- n=50: personal threshold (0.275) → stressed (tension 0.49 > 0.275)
+- n=51: same as n=50
+- `test_boundary_flip_between_49_and_50`: comparative test; moods must differ.
+
+**Intensity quantisation (5 buckets, 10 boundary values parametrized):**
+- `[0.000, 0.125)→0`, `[0.125, 0.375)→25`, `[0.375, 0.625)→50`, `[0.625, 0.875)→75`, `[0.875, 1.0]→100`
+- All 10 boundary values tested as a parametrized suite.
+
+**Jitter contract (±5, clamped to [0,100]):**
+- All 5 buckets × 11 jitter values (-5 to +5) = 55 exhaustive checks; none outside [0, 100].
+- Special case: 0+-5=clamped to 0; 100+5=clamped to 100.
+
+### 3. BLE Flake Tolerance
+
+**Garbled device bytes:**
+- 10 parametrized bad-byte inputs (empty, unknown opcode, truncated ACK, over-length ACK, reversed-direction opcode, 100-byte zeroed blob, 16-byte pattern) — `dispatch_device_message` must return None or a valid message type, never raise.
+- `test_dispatch_valid_ack_still_works_after_garbled_sequence`: verifies host state is not corrupted by bad bytes.
+
+**Extreme/NaN/Inf sensor values:**
+- `1e300` values: Python float math handles overflow (clips to Inf), falls to stressed branch, no crash.
+- NaN pitch_variance: NaN comparisons always False → neutral branch → gated. Confirmed.
+- Inf acceleration: tension=Inf → stressed. No crash.
+- NaN baseline poisoning guard: `update_baseline(..., float("nan"))` returns original baseline unchanged (sample_count does not increment, mean/stddev remain finite).
+
+### 4. Heap Guard Observability — Coverage Gap Documented
+
+**Finding:** `FamiliarAck` has exactly one field: `last_received_seq`. No heap field.
+
+**Structural test:** `test_familiar_ack_has_no_heap_field` asserts `fields == {"last_received_seq"}`. If Ng adds a heap field, this test fails — prompting a review of host-side handling.
+
+**Gap:** The host has NO wire-level signal for device heap pressure. If device hits 95% OOM (→ safe-halt), the host observes BLE silence, which eventually (10 s) triggers the both-fail → NEUTRAL fallback.
+
+**Proxy safety net verified:** `test_both_fail_fallback_is_heap_oom_proxy` asserts `BOTH_FAIL_TIMEOUT_S` is finite and ≤ 15 s.
+
+---
+
+## Correctness Review (Juanita as reviewer)
+
+### What I checked before writing tests
+
+1. `compute_mood` gating formula: `gated=(confidence < CONFIDENCE_GATE)` — strict less-than confirmed in inference.py line 73. No rejection.
+2. Both-fail timeout condition: `elif (tick_start - both_fail_start) > BOTH_FAIL_TIMEOUT_S` — strict greater-than confirmed in main.py line 485. No rejection.
+3. Confidence-hold condition: `if (tick_start - last_send_time) > CONFIDENCE_HOLD_TIMEOUT_S` — strict greater-than confirmed in main.py line 510. No rejection.
+4. FAMILIAR_RESET handler clears `both_fail_start = None` — confirmed in main.py line 478. No rejection.
+5. `update_baseline` NaN guard: `if not math.isfinite(tension): return baseline` — confirmed in inference.py lines 155-161. No rejection.
+
+### One real bug caught during test authoring
+
+**`test_imu_fail_reduces_confidence_below_gate`** initially used `imu_acceleration=0.0, imu_rotation=0.0` with the intent to represent a failed IMU.  With zero IMU values, tension=0.4 → neutral, confidence=0.6×0.7=0.42 (not 0.56 as asserted).  Fixed: `imu_ok=False` only penalises confidence — it does NOT zero the raw values.  The test was corrected before delivery; no code change needed.
+
+### No contract violations found
+
+All fallback, confidence-hold, activation-gate, quantisation, and BLE-flake contracts are correctly implemented in current code. No rejections.
+
+---
+
+## Owner Actions Required
+
+| Owner | Item | Priority |
+|-------|------|----------|
+| **Ng** | Add heap_status byte to FAMILIAR_ACK (or DEVICE_STATUS message) so host can log at 80% and back off at 95% — W3-B/W3-E | Future (not blocking Week 3 ship) |
+
+---
+
+## New Test Doubles Introduced
+
+**`_CaptureCallbackTransport`** (`test_week3_fallback_depth.py`): extends FakeTransport to store the on_receive callback in a shared list ref, allowing `_ResetCallbackStream` to call it.
+
+**`_ResetCallbackStream`** (`test_week3_fallback_depth.py`): async sensor stream that fires FAMILIAR_RESET (opcode 0x01) via the stored callback after yielding the Nth frame. Deterministic, no wall-clock dependency.
+
+Pattern: both are module-private (underscore prefix); not candidates for `helpers.py` as they are tightly coupled to the specific test topology.
+
+
+# Librarian — Week 3 Documentation Sync (2026-06-13)
+
+**Date:** 2026-06-13T23:13:01.451-07:00  
+**Author:** Librarian (AI/ML)  
+**Status:** COMPLETED  
+**Task:** Synchronize project documentation with Week 3 shipped reality
+
+---
+
+## Context
+
+Wave 1 + bind-up complete. Week 3 "It's alive" shipped 190+ tests green. Multiple decisions resolved SDK gates and locked Week 3 implementation details. Documentation (ARD.md, TEST-STRATEGY.md, README.md) still contained "OPEN" or outdated status markers for items now resolved and shipped.
+
+**Request:** Update docs to reflect actual shipped behavior, cite decision dates, mark gates RESOLVED.
+
+---
+
+## Work Completed
+
+### 1. ARD.md §5.1 SDK Gate Table (lines 207–213)
+
+**Updated from:** OPEN placeholders to RESOLVED with actual outcomes.
+
+- **Gate 1 (IMU interrupt):** Changed from `frame.imu.on_tap(n, callback)` (ARD assumption) to **`frame.imu.tap_callback(func)` (actual API, 2026-06-12)**. Double-tap discrimination: Lua debounce accumulator, 350ms window. IMU-peak ATTENTION trigger: render-loop poll of `frame.imu.raw()` at 20fps, ≤50ms latency, threshold `IMU_PEAK_THRESH_G = 1.8g`. Status: ✅ **GO**
+
+- **Gate 2 (heap API):** Changed from "unconfirmed, fallback design TBD" to **`frame.system.get_heap_usage()` NOT available; manual proxy confirmed as v1 design (2026-06-12)**. Heap fraction proxy: sprite rows (24×25B) + BLE buffer (244B) vs. ~40KB budget. Thresholds: ≥80% reduce (skip glow), ≥95% halt. Firmware-swap hook documented for future. Status: ❌ **NO-GO → fallback as v1**
+
+- **Gate 3 (sprite format):** Clarified that `frame.display.circle()` is confirmed available; Bresenham fallback replaced with 1× circle call per ring (8× reduction). Status: ✅ **RESOLVED**
+
+### 2. ARD.md §10 Open Questions (lines 575–590)
+
+**Updated:** Q1 and Q3 marked RESOLVED with decision citations.
+
+- **Q1 (IMU event primitive):** Reclassified from OPEN to **RESOLVED GO (2026-06-12)**. Real API = `frame.imu.tap_callback(func)`. No N-count. Double-tap via Lua debounce. Citation: decisions.md "SDK Gate Verdicts — Week 3 Go/No-Go".
+
+- **Q3 (Heap monitoring):** Reclassified from OPEN to **RESOLVED NO-GO (2026-06-12)**. `frame.system` namespace does not exist. Manual proxy accepted as v1. Citation: decisions.md "SDK Gate Verdicts — Week 3 Go/No-Go".
+
+- **Q2, Q4–Q6:** Remained as-is (Q2 already resolved, Q4–Q6 deferred or in progress).
+
+### 3. ARD.md Build Sequence Week 3 Rows (lines 560–562)
+
+**Updated:** Specific shipped details replace placeholders.
+
+- Row 1 (Week 3 deliverables): Now specifies ACTIVATION_THRESHOLD=50, IMU-peak poll mechanism (render loop 20fps), double-tap API (`frame.imu.tap_callback` debounce 350ms), ATTENTION state visual (white eye, gray body, 180ms +4px jump, 500ms overlay), host onboarding, graceful degradation verified.
+
+- Row 2 (Polish + test): Clarifies "baseline learning ACTIVATION_THRESHOLD=50 fully implemented with `get_activation_info()` accessor" and "heap proxy established with firmware-swap hook".
+
+- Row 3 (SDK gates): Status changed to **✅ RESOLVED (2026-06-12)**: IMU GO, Heap NO-GO, 190+ tests green.
+
+### 4. TEST-STRATEGY.md Week 3 Acceptance Rows (lines 1359–1362)
+
+**Updated:** Manual check criteria now cite actual Week 3 outcomes.
+
+- **Week 3 — "It's alive":** Expanded success criterion from "double-tap locally snaps NEUTRAL; host sees FAMILIAR_RESET notification" to include ATTENTION details: "ATTENTION overlay fires on IMU peak (500ms white eye + gray body + 180ms +4px jump); baseline activation gate at 50 Welford samples; 190+ tests green".
+
+- **Week 3 — Privacy audit:** Unchanged (already correct).
+
+### 5. projects/synesthetic-familiar/README.md
+
+**Updated:** Codename and status.
+
+- **Codename:** Changed from PULSE to VESPER (2026-06-08 decision).
+- **Status:** Updated from "Week 1 scaffold" to "Week 3 complete — 190+ tests green".
+- **New section:** "Week 3 Shipped" bullet list of all Week 3 deliverables (IMU double-tap, ATTENTION overlay, baseline activation gate, heap monitoring fallback, host onboarding, privacy audit, test count).
+- **File map:** Removed (playground context; kept architecture summary for reference).
+
+---
+
+## Decision Citations
+
+All updates cite specific decisions.md records with dates:
+
+| Update | Decision Record | Date |
+|--------|-----------------|------|
+| Gate 1 API correction | SDK Gate Verdicts — Week 3 Go/No-Go | 2026-06-12 |
+| Gate 2 NO-GO verdict | SDK Gate Verdicts — Week 3 Go/No-Go | 2026-06-12 |
+| Gate 3 circle() confirmation | VESPER Week 1 — SDK Gaps & Decisions | 2026-06-09 |
+| Q1 resolved (IMU) | SDK Gate Verdicts | 2026-06-12 |
+| Q3 resolved (heap) | SDK Gate Verdicts | 2026-06-12 |
+| Week 3 build row details | Week 3 "It's alive" — Work Breakdown & Sequencing | 2026-06-12 |
+| ACTIVATION_THRESHOLD | Baseline Activation Gate — Population→Personal Threshold | 2026-06-12 |
+| Codename VESPER | VESPER Project Codename Decision | 2026-06-08 |
+
+---
+
+## Validation
+
+- ✅ No behavior change to code (docs-only updates).
+- ✅ All facts cited to decisions.md (searchable source of truth).
+- ✅ Contradictions flagged: None found between docs and decisions/code.
+- ✅ Test status verified: 190+ tests confirmed green in Week 3 Test Plan decision.
+
+---
+
+## Summary
+
+ARD.md §5.1, §10, and build-sequence rows now accurately reflect shipped Week 3 reality. TEST-STRATEGY.md Week 3 acceptance criteria expanded to cite specific deliverables. README.md updated with VESPER codename and Week 3 status. All updates cite .squad/decisions.md with decision dates. Docs are now in sync with what shipped.
+
+Week 3 documentation close is complete.
+

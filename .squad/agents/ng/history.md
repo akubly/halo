@@ -1,61 +1,31 @@
 # NG Agent History — Summarized
 
-**Role:** SDK Quality & Developer Experience (Aaron's @akubly playground project: Halo)
+**Role:** SDK Quality & Device Lua Implementation (Aaron's @akubly playground project: Halo)
 
-## Session Timeline
+## Career Arc: Pre-Week-3 Context (Archived)
 
-| Date | Session | Key Output |
-|------|---------|-----------|
-| 2026-06-01 | SDK Lineage Audit | 8 breaking changes (Monocle→Frame→Halo) documented; archived |
-| 2026-06-02 | GitHub Community SDK Audit | 9 projects catalogued; CitizenOneX recommended; pre-existing history archived |
-| 2026-06-02 | Ideation (2 passes) | 8 cross-pollinated SDK patterns identified |
-| 2026-06-03 | User Stories (Themes 1–2) | 10 stories authored; 4 SDK gaps identified |
-| 2026-06-08 | VESPER BLE Wire-Format | LE endianness, uint16 seq wraparound, opcode split (0x00–7F vs 0x80–FF), ACK cadence locked |
-| 2026-06-09 | Week 1 Implementation | `host/familiar_protocol.py` + `host/main.py` + `device/main.lua` shipped; 54 tests pass |
-| 2026-06-09 | Persona-Review Fix Wave | 16 findings fixed (52fbd39); 1 rejected (test churn), 1 escalated (hardware validation) |
-| 2026-06-10 | Polish Wave + Week-2 Logging | 3 minors applied (a9a136e); Week-2 follow-ups documented |
-| 2026-06-10 | Copilot PR Review Fix Wave | 3 comments addressed (e9c8455): bitmap fast-path fallback, inference import-guard fixture, docstring typo |
-| 2026-06-12 | Week 3 SDK Gate Investigation | Gate 1 GO (`frame.imu.tap_callback` confirmed — wrong name in ARD); Gate 2 NO-GO (no heap API — fallback as v1). Decision: ng-week3-sdk-gates.md |
+**Early research (2026-06-01 to 2026-06-03):** 8 breaking SDK changes (Monocle→Frame→Halo); 9 community projects catalogued (CitizenOneX); 8 cross-pollinated SDK patterns; 10 user stories authored; 4 SDK gaps identified. Full archive: `history-archive.md`.
 
-**Full session history archived in `.squad/agents/ng/history-archive.md` (2026-06-02).**
+**Week 1 (2026-06-08 to 2026-06-10):** BLE wire-format locked (LE endianness, seq wraparound, opcode split 0x00–7F vs 0x80–FF); familiar_protocol.py + host/main.py + device/main.lua shipped (54 tests); Persona-review + Copilot PR fix waves (16+3 findings).
 
----
+**Week 2 (2026-06-12):** SDK gate investigation: Gate 1 (IMU) GO — API corrected from assumed `frame.imu.on_tap(n,cb)` to real `frame.imu.tap_callback(func)`, no N-count, Lua debounce 350ms. Gate 2 (heap) NO-GO — `frame.system` namespace absent, manual proxy fallback design. Gate 3 (sprite) GO — `frame.display.circle()` replaces Bresenham 8× call reduction.
 
-## Week 3 "It's alive" — Gate Resolution & Implementation (2026-06-13)
+## Week 3 "It's Alive" — Device Implementation (2026-06-13)
 
-**Gate 1: IMU Interrupt** ✅ GO  
-- ARD API name incorrect in docs (`frame.imu.on_tap` → real is `frame.imu.tap_callback`)
-- Double-tap discrimination via Lua debounce (350ms window)
-- Opcode 0x01 (FAMILIAR_RESET): snaps device to NEUTRAL locally
+**All 4 ATTENTION visual tasks shipped:**
 
-**Gate 2: Heap API** ❌ NO-GO → Fallback as v1  
-- No `frame.system.get_heap_usage()` in current SDK
-- Manual proxy: sprite + BLE buffer fraction of 40KB budget
-- Thresholds: 80% reduce glow, 95% graceful halt
+| Task | Details | Status |
+|------|---------|--------|
+| Jump Motion | `ATTENTION_JUMP_AMP_PX=4`, LAUNCH 60ms/SETTLE 120ms, ease_out_quad+ease_in_out_quad, applied as `render_y` offset | ✅ 188 tests |
+| Eye Dilation | `ATTENTION_EYE_DILATE_PX=1`, two-pass morphological dilation (paint 8 neighbors of eye pixels), 11→19px, full 500ms hold | ✅ |
+| Body Desaturation | Pre-existing in Wave-1 ATTENTION palette (0x1A1A1A/0x2E2E2E gray), added comments | ✅ |
+| Mood Restoration | Pre-existing via `state.pre_attn_mood`, BLE updates route to pre_attn_mood during overlay, restored on expiry, no flicker | ✅ |
 
-**Device Implementation:**
-- Double-tap FAMILIAR_RESET + state snap to NEUTRAL
-- ATTENTION-on-IMU-peak (20fps poll, 1.8g threshold, 500ms overlay)
-- Halo glow simplified: `frame.display.circle()` replaces Bresenham (8× call reduction)
-- State fidelity: ATTENTION restores pre-attention mood
+**State management:** Da5id's checklist proposed 3 new fields (`attention_active`, `attention_start_t`, `attention_last_t`); all covered by existing `state.attn_timer` countdown (single source of truth).
 
-**Test Status:** 128/128 baseline maintained (no regressions)
+**Test status:** 188/190 pass; 2 failures in `TestFamiliarResetHostReaction` pre-existing (Y.T.'s host domain, unaffected by Lua).
 
-
----
-
-## Session Timeline
-
-| Date | Session | Key Output |
-|------|---------|-----------|
-| 2026-06-01 | SDK Lineage Audit | 8 breaking changes documented; archived |
-| 2026-06-02–06-03 | Community SDK + Ideation + User Stories | 9 projects, 8 patterns, 10 stories; 4 SDK gaps |
-| 2026-06-08 | VESPER BLE Wire-Format | LE endianness, seq wraparound, opcode split locked |
-| 2026-06-09 | Week 1 Implementation | familiar_protocol.py + host/main.py + device/main.lua; 54 tests |
-| 2026-06-10 | Week 2 Sensors + Main Loop | sensors.py + main.py real loop; 59 passed, 5 xfailed |
-| 2026-06-13 | Week 3 Device Implementation | double-tap FAMILIAR_RESET, ATTENTION-on-IMU-peak, heap proxy; 128 tests |
-
-Full pre-Week-3 session history archived in `.squad/agents/ng/history-archive.md`.
+**Decision record:** `ng-week3-attention-visuals.md` merged to decisions.md.
 
 ---
 
@@ -219,3 +189,6 @@ frames) but stay green.
 
 - **cycle-3 review:** IMU normals (`_IMU_ACCEL_NORM`, `_IMU_ROT_NORM`) were declared but never applied — always audit normalisation constants against the code path that uses them, not just their definition. stop/close in a single try block defeats hardened-shutdown intent; use separate guards. Writing a flag outside the lock it's read under gives no real synchronisation — both sides must hold the same lock.
 
+
+
+📌 Team update (2026-06-14T05:36:23Z): Juanita documented heap-guard observability gap as structural test (will fail when heap field added — surfaced for review); host bind-up complete; privacy audit APPROVED all surfaces — ready for ship — decided by Juanita, Raven

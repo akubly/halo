@@ -43,7 +43,21 @@
 3. Pairing mode not time-limited — 8s button hold can trigger accidentally
 4. No documented data retention policy
 
+### Phase 5: Week 3 Privacy Audit (2026-06-13T23:13:01-07:00)
+
+- Audited 4 surfaces: ATTENTION-on-IMU-peak, onboarding/baseline activation gate, W3-1 snapshot zeroing, secrets scan.
+- **All gates: APPROVED / CONFIRMED / CLEAN. Week 3 ships.**
+  - **ATTENTION accel path:** Render-loop poll of `frame.imu.raw()` is purely on-device. `ax/ay/az/mag` are Lua locals; no BLE send in the IMU-peak branch. No new characteristic. Bystander cannot infer stress/calm from ATTENTION visual (gray+white+jump ≠ stress/calm signal). ✅ APPROVED
+  - **Onboarding/baseline.json:** `mean`/`stddev` of tension scalar — derived behavioral metric, not biometric-identifying. P2-2 deferral (plaintext) not regressed. New P2-4 item: `get_calibration_status()` prints `mean=X.XXX, stddev=X.XXX` to stdout when personalized — move to `--verbose`/debug in Phase-2. Owner: Y.T. ✅ APPROVED (Phase-1 accepted risk)
+  - **W3-1 snapshot zeroing:** Three-layer zeroing confirmed in `_extract_frame()` `finally` block: (1) `self._buffer[:]=0.0` under lock, (2) `samples[:]=0.0` in finally, (3) `del samples`. Also zeroed in `stop()`. ✅ CONFIRMED
+  - **Secrets scan:** No API keys, tokens, cloud SDKs, or credentials in Week 3 code. ✅ CLEAN
+- Audit verdict filed: `.squad/decisions/inbox/raven-week3-audit.md`
+- New deferred item added: **P2-4** (stdout mean/stddev print, owner Y.T.)
+
 ## Full Session History
 
 Archived in `.squad/agents/raven/history-archive-detailed.md` (detailed threat inventory, ideation passes, story mappings, Week 1 & 2 audit narratives).
 
+
+
+📌 Team update (2026-06-14T05:36:23Z): Da5id eye dilation INCLUDED (§6 Q1); host bind-up + onboarding complete (Y.T.); ATTENTION visuals shipped (Ng); 262 tests green (Juanita); docs synced (Librarian) — all surfaces APPROVED, ship ready — decided by Da5id, Y.T., Ng, Juanita, Librarian

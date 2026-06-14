@@ -161,3 +161,44 @@ Pitched UX-design-lens codename candidates for the Synesthetic Familiar. Team co
 
 **Next step:** Y.T. creates `host/onboarding.py` module per Juanita's test contract (is_first_launch, run_first_launch_flow, run_returning_flow). Tests will immediately pass.
 
+---
+
+## Week 3 "It's alive" — Wave-2 Bind-Up (2026-06-13)
+
+**Task:** Wire Librarian's activation accessor and Ng's FAMILIAR_RESET host reaction;
+create `host/onboarding.py` for first-launch/returning-user flows.
+
+**What shipped:**
+
+- **BIND-UP 1:** Replaced `_is_baseline_active` import shim and age-based fallback
+  (`_approx_baseline_active`, `_baseline_age_days`) with a direct import of
+  `get_activation_info()` and `ACTIVATION_THRESHOLD` from `host.inference`.
+  `get_calibration_status()` now shows `"calibrating (n / 50 samples)"` or
+  `"personalized (n=N samples, mean=M, stddev=S)"` — sample-count progress beats
+  the old day-count display. Dead imports (`datetime`, `_BASELINE_MIN_DAYS`) removed.
+
+- **BIND-UP 3:** `_make_device_msg_handler()` now accepts a `list[bool]` reset flag.
+  `run()` creates the flag, passes it to the handler, and checks it at the top of
+  each frame. On flag set: `seq.reset()`, send NEUTRAL via new `_send_neutral_reset()`
+  helper, clear `both_fail_start`, update `last_send_time`, then `continue` (so
+  the frame's sensor data doesn't immediately overwrite the NEUTRAL).
+
+- **`host/onboarding.py` (new):** `is_first_launch(path)` pure check;
+  `run_first_launch_flow(path)` creates marker + prints banner;
+  `run_returning_flow(baseline)` logs returning-user status without raising on None.
+
+**Key learnings:**
+- A `list[bool]` flag is the right cross-closure shared state in single-threaded asyncio.
+  `asyncio.Event` is overkill when the callback fires synchronously inside `send()`.
+- `continue` after a reset-reaction send is important — otherwise the frame's live mood
+  data immediately overwrites the NEUTRAL, defeating the reset. The `finally` pacer
+  still fires on `continue`.
+- Removing xfail decorators (not just satisfying skip conditions) is what makes tests
+  count as "passed" vs "xpass" in the pytest summary line.
+
+**Test results:** 190 passed, 0 skipped, 0 xfailed (was 176/11/3). +14 net.
+
+**Decision file:** `.squad/decisions/inbox/yt-week3-bindup.md`
+
+
+📌 Team update (2026-06-14T05:36:23Z): Raven identified P2-4 (stdout print → --verbose); Librarian docs synced to Week 3 reality; 262 tests green; privacy audit APPROVED — ready for ship — decided by Raven, Librarian
