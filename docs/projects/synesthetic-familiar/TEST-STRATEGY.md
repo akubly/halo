@@ -1358,7 +1358,7 @@ def test_stressed_sprite_has_warm_color_pixels():
 |-----------|-------------|-------------------|
 | Week 1 — "It moves" | Aaron sees creature bobbing on real Halo | Smooth bob at ~0.25Hz; jitter present but subtle; BLE log shows clean packets |
 | Week 2 — "It reacts" | Aaron raises voice → creature stress response | STRESSED visual within 500ms; warm color shift visible; returns to NEUTRAL within 60s of settling |
-| Week 3 — "It's alive" | 1-hour wear session + gesture test | No OOM or BLE freeze; double-tap locally snaps NEUTRAL on device; host sees FAMILIAR_RESET notification; creature feels "alive not robotic" |
+| Week 3 — "It's alive" | 1-hour wear session + gesture test | No OOM or BLE freeze; double-tap locally snaps NEUTRAL on device (FAMILIAR_RESET 0x01 sent); ATTENTION overlay fires on IMU peak (500ms white eye + gray body + 180ms +4px jump); baseline activation gate at 50 Welford samples; creature feels "alive not robotic"; 190+ tests green |
 | Week 3 — Privacy audit | Non-wearer observes creature for 5 min | Cannot infer stress/calm state from visual alone; no labeled text visible |
 
 #### M5 — Week-1 Programmatic Acceptance Gate

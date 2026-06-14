@@ -202,13 +202,13 @@ Any state ──────────▶ ATTENTION overlay (500ms) ──▶ 
                       (not a peer state; does not reset to NEUTRAL)
 ```
 
-**SDK go/no-go gates (per NG-T2-*):**
+**SDK go/no-go gates (resolved Week 3, per decisions.md 2026-06-12 & 2026-06-13):**
 
-| Gap | Critical Path | Go/No-Go Milestone | Fallback Design |
-|-----|---------------|--------------------|-----------------|
-| `frame.imu.on_tap` / `frame.on_imu_peak` interrupt callback (current SDK is polling-only) | Week 3 (double-tap FAMILIAR_RESET; ATTENTION trigger) | Before Week 3 merge | Debounced poll loop at ≤50ms; if no interrupt support, ATTENTION trigger silently disabled in v1 |
-| Sprite pixel-buffer format for `bitmap()` (indexed 4-bit, RGB565, or RLE — unconfirmed) | Week 1 (rendering; asset pipeline) | Before Week 1 sign-off | `set_pixel()` per-pixel loop as confirmed-correct baseline; Week-1 fallback = simplest indexed format confirmed with Brilliant; switch to `bitmap()` once format locked |
-| Heap monitoring: `frame.system.get_heap_usage()` (not confirmed in current Lua stdlib) | Week 3 (heap guard 80%/95%) | Before Week 3 merge | Manual allocation tracking: count sprite rows + BLE buffer bytes as proxy; thresholds remain 80%/95% |
+| Gap | Critical Path | Verdict | Implementation |
+|-----|---------------|---------|--------------------|
+| IMU interrupt callback — `frame.imu.on_tap` / `frame.on_imu_peak` | Week 3 (double-tap FAMILIAR_RESET; ATTENTION trigger) | ✅ **RESOLVED GO (2026-06-12)** — `frame.imu.tap_callback(func)` confirmed available; no N-count discriminator; Lua double-tap debounce 350ms window. ATTENTION-on-IMU-peak via render-loop poll of `frame.imu.raw()` at 20fps (≤50ms latency), threshold `IMU_PEAK_THRESH_G = 1.8`. | Shipped Week 3: double-tap detection on-device (Lua debounce accumulator), FAMILIAR_RESET opcode 0x01 sent to host; IMU peak poll in render loop triggers ATTENTION state [3] for 500ms with white eye, gray body, 180ms jump animation (+4px), 500ms overlay then restore-to-previous-mood. |
+| Sprite pixel-buffer format for `bitmap()` (indexed 4-bit, RGB565, or RLE) | Week 1 (rendering; asset pipeline) | ✅ **RESOLVED (2026-06-09)** — `frame.display.circle()` confirmed available; Bresenham fallback unnecessary | Shipped Week 1: `set_pixel()` per-pixel baseline; Week 3 refactor uses `frame.display.circle()` for halo glow (3 concentric rings), 8× reduction in API calls per ring. |
+| Heap monitoring: `frame.system.get_heap_usage()` | Week 3 (heap guard 80%/95%) | ❌ **RESOLVED NO-GO (2026-06-12)** — `frame.system` sub-namespace does NOT exist in current Halo Lua stdlib; no `get_heap_usage()` available | Shipped Week 3 fallback as v1 design: manual `heap_fraction()` proxy (sprite rows 24×25B + BLE buffer 244B, budget 40KB). Thresholds: ≥80% reduce (skip glow), ≥95% safe-halt. Firmware-swap hook documented in main.lua for future hardware validation. |
 
 These are **explicit go/no-go gates**: if a gap cannot be resolved before its milestone, the dependent feature is blocked until the gap is closed or the fallback is accepted as the v1 design. (See also §10 for investigation assignments.)
 
@@ -557,9 +557,9 @@ def compute_mood(audio_rms, audio_pitch_variance, imu_acceleration, imu_rotation
 | Week 1 | **SDK gate: sprite format** | Ng confirms `bitmap()` pixel-buffer format with Brilliant SDK | If unconfirmed, Week 1 ships with `set_pixel()` fallback (correct for any firmware); `bitmap()` unlocked when format known |
 | **Week 2** | **"It reacts"** | Host captures desktop mic + Halo IMU relay; local heuristic inference; creature reflects mood | Python sounddevice (desktop mic) + Halo IMU relay; tone/pitch variance + acceleration + rotation weighting; 10Hz updates to device |
 | Week 2 | Stress/calm states | Visual states per DASID spec (breathing speed ±0.75Hz vs 0.15Hz, color shift warm↔cool) | Lua animation state machine: neutral ↔ calm ↔ stressed; smooth 200-500ms interpolation |
-| **Week 3** | **"It's alive"** | First-launch UX; attention moments (ATTENTION overlay on IMU peak); quick-reset (double-tap); graceful fallback | Host onboarding flow in Python; device-side IMU-peak callback to `on_imu_peak`; BLE timeout + neutral fallback after 10s |
-| Week 3 | Polish + test | Test on real device; tune confidence thresholds; document | Baseline learning (pop defaults days 1-3, personal mean+1.5σ after); privacy audit checklist ✅; heap monitoring at 80% |
-| Week 3 | **SDK gates: IMU interrupt + heap API** | Ng confirms `frame.imu.on_tap` availability and `frame.system.get_heap_usage()` | IMU fallback: debounced poll loop; heap fallback: manual allocation tracking (see §5.1 gate table) |
+| **Week 3** | **"It's alive"** | Host onboarding flow + IMU-peak ATTENTION overlay + double-tap quick-reset + graceful fallback + baseline activation gate | ACTIVATION_THRESHOLD = 50 Welford samples (population defaults <50, personal mean+1.5σ ≥50); device IMU-peak poll (render loop 20fps) triggers ATTENTION state for 500ms (white eye, gray body, +4px jump 180ms); double-tap via `frame.imu.tap_callback()` debounce (350ms window) sends FAMILIAR_RESET on-device; host onboarding displays calibration status; heap proxy (80% reduce, 95% halt) in render loop; all graceful degradation (BLE timeout, sensor failure, confidence hold) verified on hardware |
+| Week 3 | Polish + test | Test on real device; tune confidence thresholds; document | Baseline learning ACTIVATION_THRESHOLD = 50 fully implemented with `get_activation_info()` accessor; privacy audit checklist ✅; heap proxy established with firmware-swap hook documented in main.lua (TODO when `frame.system.get_heap_usage()` ships) |
+| Week 3 | **SDK gates: IMU + heap** | Ng confirms `frame.imu.tap_callback` availability and heap fallback design | ✅ **RESOLVED (2026-06-12):** IMU interrupt GO (`frame.imu.tap_callback`); heap API NO-GO (fallback manual proxy as v1). See §5.1 gate table for implementation. 190+ tests green. |
 
 **Success criteria (locked):**
 - Week 1: Emulator or real device renders bobbing sprite from ≥10 mock FAMILIAR_UPDATE packets; BLE send/receive log is clean with no errors; creature bobs without frame stutter or dropped-frame judder (intentional 5–10% anti-robotic jitter is expected and correct)
@@ -570,23 +570,23 @@ def compute_mood(audio_rms, audio_pitch_variance, imu_acceleration, imu_rotation
 
 ## 10. Open Questions
 
-*Not decisions for Aaron — requires team follow-up*
+*Not decisions for Aaron — status tracking only*
 
-> **SDK gaps Q1–Q3 are now explicit go/no-go gates** (reclassified from "open but not blocking"). See §5.1 gate table for fallback designs and milestone assignments. They are listed here for investigation tracking only.
+> **SDK gaps Q1–Q3 are now RESOLVED** (2026-06-12, Ng). See §5.1 gate table above for implementation details and decision dates.
 
-1. **IMU event primitive [go/no-go: Week 3]:** Does `brilliant-ble` support interrupt-style IMU callbacks, or must we poll? If polling-only, Lua must implement a debounced tap-detection loop; target latency ≤50ms. Fallback: debounced poll. (NG to investigate with SDK team)
+1. **IMU event primitive [RESOLVED GO: 2026-06-12]:** The real API is `frame.imu.tap_callback(func)`, not the ARD's assumed `frame.imu.on_tap(n, callback)`. No built-in N-count discriminator. Double-tap discrimination implemented via Lua debounce accumulator with 350ms window. IMU-peak ATTENTION trigger uses render-loop poll of `frame.imu.raw()` at 20fps (≤50ms latency), threshold `IMU_PEAK_THRESH_G = 1.8g`. *(Decision: decisions.md 2026-06-12 "SDK Gate Verdicts — Week 3 Go/No-Go")*
 
-2. **Sprite format [go/no-go: Week 1]:** What is the canonical pixel-buffer format for Lua `bitmap()` calls — indexed 4-bit, raw RGB565, or run-length encoded? Determines sprite asset pipeline. Fallback: `set_pixel()` confirmed-correct baseline. (NG to document from SDK source / Brilliant docs)
+2. **Sprite format [RESOLVED: 2026-06-09]:** `frame.display.circle()` confirmed available in emulator and Halo Lua stdlib. Replaced Bresenham mid-point loop with direct `circle()` calls for halo glow (3 rings: 1 API call per ring, 8× reduction). No format ambiguity; `set_pixel()` fallback unnecessary. *(Decision: decisions.md 2026-06-09 "SDK Gaps & Decisions")*
 
-3. **Heap monitoring [go/no-go: Week 3]:** Is `frame.system.get_heap_usage()` available in current Lua stdlib? If absent, safe-halt threshold must be approximated by tracking allocation sites manually. Fallback: manual allocation tracking. (NG to verify against current Halo firmware)
+3. **Heap monitoring [RESOLVED NO-GO: 2026-06-12]:** `frame.system.get_heap_usage()` does NOT exist in current Halo Lua stdlib. `frame.system` sub-namespace is not implemented. Fallback design accepted as v1: manual `heap_fraction()` proxy counting sprite rows (24×25B) + BLE buffer (244B) against ~40KB app budget. Thresholds: ≥80% reduce complexity (skip halo glow), ≥95% safe-halt (blank screen). Firmware-swap hook documented in main.lua for future hardware update. *(Decision: decisions.md 2026-06-12 "SDK Gate Verdicts — Week 3 Go/No-Go")*
 
-4. **Baseline learning persistence:** ~~Where do we store the wearer's personal baseline between sessions?~~ **RESOLVED (Phase 1):** Host filesystem (`~/.vesper/baseline.json`). Phase-2 durable strategy deferred. *(See §5.4.)*
+4. **Baseline learning persistence:** **RESOLVED (Phase 1, 2026-06-10):** Host filesystem (`~/.vesper/baseline.json`). Welford online mean + stddev, saved at exit, loaded at startup. Activation threshold = 50 Welford samples (statistical minimum where SE(s) ≈ 10% of stddev). *(See §5.4.)*
 
 5. **Cross-platform parity:** If Phase 2 adds Web Bluetooth, how do we maintain parity with the Python host? Shared mood calculation logic requires a JS port or a shared native library. (Deferred to Phase 2 scoping)
 
 6. **Accessibility:** How does a wearer with colorblindness perceive stress vs. calm? (Da5id to propose alternative visual encoding)
 
-> **Resolved (2026-06-08, Ng):** Wire-format items previously listed here — endianness, sequence wraparound/dedup, FAMILIAR_RESET direction and opcode, ACK cadence — are now fully specified in §5.2. No further open questions on BLE wire format.
+> **Resolved wire-format items (2026-06-08, Ng):** Endianness (little-endian), sequence wraparound/dedup (uint16, signed delta window), FAMILIAR_RESET direction (Device→Host), FAMILIAR_RESET opcode (0x01), ACK cadence (every 10 packets), ACK opcode (0x02) — all fully specified in §5.2. No further open questions on BLE wire format.
 
 ---
 
