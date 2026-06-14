@@ -69,7 +69,7 @@ def run_returning_flow(baseline: object) -> None:
 
     Accepts the loaded Baseline (or None for corrupt/missing baseline) and logs
     a brief welcome-back message.  The actual calibration status string is
-    surfaced via get_calibration_status() in main.py's print_onboarding().
+    surfaced via get_calibration_status() called directly from run() in main.py.
     """
     if baseline is None:
         logger.info("[Onboarding] returning user — baseline missing or corrupt; using population defaults")

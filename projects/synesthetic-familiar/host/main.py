@@ -33,7 +33,7 @@ import random
 import sys
 import time
 from pathlib import Path
-from typing import AsyncIterator, Awaitable, Callable, Protocol, TextIO, runtime_checkable
+from typing import AsyncIterator, Awaitable, Callable, Protocol, runtime_checkable
 
 from host.familiar_protocol import (
     FamiliarAck,
@@ -108,34 +108,6 @@ def get_calibration_status(baseline: Baseline | None) -> str:
         f"calibrating ({info.sample_count} / {info.samples_needed} samples — "
         "population defaults active)"
     )
-
-
-def print_onboarding(baseline: Baseline | None, *, out: TextIO | None = None) -> None:
-    """
-    Print first-launch onboarding or session-start status to `out` (default: stdout).
-
-    First launch (baseline=None): explains the 3-day baseline ramp-up per ARD §5.4.
-    Subsequent launches: shows current calibration state concisely.
-
-    Testable: inject out=io.StringIO() to capture output without touching stdout.
-    No hardware access — purely prints based on baseline state.
-    """
-    w = out if out is not None else sys.stdout
-    status = get_calibration_status(baseline)
-    if baseline is None:
-        print("", file=w)
-        print("╔══════════════════════════════════════════╗", file=w)
-        print("║  VESPER  —  First Launch                 ║", file=w)
-        print("╚══════════════════════════════════════════╝", file=w)
-        print("", file=w)
-        print("  Your familiar is waking up for the first time.", file=w)
-        print("  Days 1–3: learning on population baselines.", file=w)
-        print("  After day 3: it adapts to your personal rhythm.", file=w)
-        print("", file=w)
-        print(f"  Calibration: {status}", file=w)
-        print("", file=w)
-    else:
-        print(f"\n[VESPER] Familiar online — {status}\n", file=w)
 
 
 # ---------------------------------------------------------------------------
