@@ -17,10 +17,10 @@ Week 3 milestone "It's alive" complete (2026-06-13):
 - ✅ **IMU double-tap FAMILIAR_RESET** — device detects tap via `frame.imu.tap_callback()`, Lua debounce 350ms window, snaps to NEUTRAL on-device, sends opcode 0x01 to host
 - ✅ **ATTENTION overlay on IMU peak** — render-loop poll of `frame.imu.raw()` at 20fps, threshold `IMU_PEAK_THRESH_G = 1.8`, state [3] palette (white eye + gray body + 180ms +4px jump + 500ms overlay + restore-to-previous-mood)
 - ✅ **Baseline activation gate** — ACTIVATION_THRESHOLD = 50 Welford samples; population defaults <50, personal mean+1.5σ ≥50; `get_activation_info()` accessor
-- ✅ **Heap monitoring (fallback)** — `frame.system.get_heap_usage()` NOT available; manual proxy (sprite rows + BLE buffer) with 80% reduce / 95% halt thresholds; firmware-swap hook documented
+- ✅ **Heap guard (static proxy, GAP-3 pending)** — `frame.system.get_heap_usage()` NOT available; placeholder proxy (~2% of budget via sprite rows + BLE buffer) is structurally wired but the 80% reduce / 95% halt thresholds are inert until a real firmware heap API ships; firmware-swap hook documented
 - ✅ **Host onboarding UX** — first-launch calibration status display, "learning your patterns" flow, ATTENTION trigger display
 - ✅ **Privacy audit** — abstract visuals, no labeled text, on-device inference only, no cloud egress
-- ✅ **265 tests green** — acceptance tests for double-tap reset, baseline activation, heap thresholds, onboarding flow, graceful fallback
+- ✅ **265 tests green** — acceptance tests for double-tap reset, baseline activation, heap guard constants/structure (runtime thresholds inert until GAP-3), onboarding flow, graceful fallback
 
 See `.squad/decisions.md` (2026-06-12 & 2026-06-13) for detailed decision records.
 

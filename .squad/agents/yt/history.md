@@ -116,7 +116,7 @@ See `user-stories-themes-1-2-2026-06-03.md` for full stories + acceptance criter
 
 ## Codename Brainstorm — 2026-06-08
 
-Pitched UX-design-lens codename candidates for the Synesthetic Familiar. Team converged on **PULSE** (4 agents independently nominated variants). Official project codename now PULSE. See `.squad/orchestration-log/2026-06-08T07-17Z-codename-brainstorm.md`.
+Pitched UX-design-lens codename candidates for the Synesthetic Familiar. Team converged on **PULSE** as the leading candidate (4 agents independently nominated variants). PULSE was subsequently renamed to **VESPER** — VESPER is the current official codename. See `.squad/orchestration-log/2026-06-08T07-17Z-codename-brainstorm.md`.
 
 ---
 
@@ -252,3 +252,33 @@ entry point, not just unit tests on the module itself.
 **Ready for ship-to-pr:** Push branch `synesthetic-familiar/week3-its-alive`, open PR, request Copilot review, then cloud-review-cycle, then squash-merge.
 
 **Phase-2 deferral:** Reset-flag thread-safety (if multi-threaded host adopted).
+
+
+---
+
+### Session 2026-06-14: PR #4 Copilot Fix — baseline_path threading in host/main.py
+
+**Context:** Copilot's review of PR #4 (branch synesthetic-familiar/week3-its-alive) flagged three
+issues in host/main.py. Fixed host-only code; inference.py, tests, and docs untouched.
+
+**Fixes applied:**
+
+1. **load_baseline() missing baseline_path (~line 429)** — When the _LOAD_BASELINE_FROM_DISK
+   sentinel triggered, load_baseline() was called without the injectable aseline_path, so
+   an injected tmp path for sentinel detection was silently ignored for the actual disk read.
+   Fixed: load_baseline(baseline_path). Production-safe because the default is _DEFAULT_BASELINE_PATH
+   which equals inference._BASELINE_PATH.
+
+2. **save_baseline() missing baseline_path (~line 531)** — Same root cause in the shutdown path.
+   An injected aseline_path file would remain empty after shutdown while the default file was
+   written, causing mismatched sentinel/baseline state on the next run.
+   Fixed: save_baseline(baseline, baseline_path).
+
+3. **Unused import sys (line 33)** — Confirmed zero sys. usages in file; removed the import.
+   Leftover from print_onboarding removal.
+
+**Tests:** 265 passed, 0 failed. baseline_path threading did not break any existing test.
+
+**Durable lesson:** Injectable path parameters must flow through *all* I/O calls that use them —
+sentinel-file detection and disk read/write are both affected. When adding an injectable seam,
+audit all I/O call sites in the same function, not just the trigger check.
