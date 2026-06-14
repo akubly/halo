@@ -3072,3 +3072,127 @@ ARD.md §5.1, §10, and build-sequence rows now accurately reflect shipped Week 
 
 Week 3 documentation close is complete.
 
+
+---
+
+## 2026-06-13: Week 3 Persona Review Cycle — 2 Cycles, All Blocking/Important Addressed, 265 Green
+
+**Status:** COMPLETE  
+**Owner:** Team (Y.T., Ng, Librarian, Juanita) + Aaron (approval)  
+**Date:** 2026-06-13  
+**Branch:** synesthetic-familiar/week3-its-alive  
+**Base commit:** ee971a3  
+
+---
+
+### Executive Summary
+
+Two-cycle persona review and fix wave for Week 3 "It's Alive" milestone. **Cycle 1** surfaced 2 blocking, 4 important, 11 minor findings across Code, Security, and Architect panels (6 personas). **Cycle 2** re-reviewed all findings; all blocking/important items closed; residual dead code removed. **Final state:** 265 tests green. Branch ready for ship-to-pr.
+
+---
+
+### Cycle 1 Findings & Disposition
+
+| Category | Count | Disposition |
+|----------|-------|-------------|
+| **Blocking (B)** | 2 | B1 onboarding dual-implementation, B2 device last_seq reset |
+| **Important (I)** | 4 | I1 heap_fraction inert guards, I2 get_calibration_status leaks stats, I3 mood domain clamp, M1 byte validation |
+| **Minor (M)** | 11 | M3 baseline size guard, M5 tautological threshold, M6 README count, M1–M11 misc. |
+| **Praise** | — | Security: protocol parsing + privacy zeroing. Architect: architectural coherence. |
+
+**No security blockers.** Privacy-zeroing and protocol parsing both approved as-designed.
+
+---
+
+### Fix Wave — Agent Work (Cycle 1 → Cycle 2)
+
+#### Y.T. (Host Lead) — B1 + I2 + Minors
+
+**B1: Onboarding Dual-Implementation**
+- **Problem:** host/onboarding.py implemented correct sentinel logic but was never called from un(). Meanwhile un() used untested print_onboarding(baseline) helper, which repeated banner on every launch until ≥50 high-confidence samples accumulated (days).
+- **Fix:** Wired onboarding.py as single source of truth. Replaced print_onboarding(baseline) with:
+  `python
+  if is_first_launch(baseline_path):
+      run_first_launch_flow(baseline_path)
+  else:
+      run_returning_flow(baseline)
+      print(f"\n[VESPER] Familiar online — {get_calibration_status(baseline)}\n")
+  `
+  Added aseline_path: Path injectable parameter; three integration tests driving un() end-to-end.
+
+**I2: get_calibration_status() Leaking Stats**
+- **Problem:** Status string formatted mean/stddev directly (mean={baseline.mean:.3f}, stddev={baseline.stddev:.3f}). Raw model parameters are implementation detail; surfacing them confuses UX.
+- **Fix:** Status now contains only activation state and sample count: "calibrating (n / 50 samples — population defaults active)" or "personalized (n samples)".
+
+**Minors:** Added ng injectable to _send_neutral_reset, removed unused imports.
+
+#### Ng (Device Lead) — B2 + I1 + I3 + M1
+
+**B2: Double-Tap Reset Did Not Reset Device Seq-Dedup**
+- **Problem:** 	ap_callback snapped state to NEUTRAL and sent FAMILIAR_RESET opcode, but left state.last_seq stale. Host called seq.reset() and restarted counter at  x0000; device's stale last_seq caused is_newer_seq(0x0000, <stale>) to reject first post-reset packet.
+- **Fix:** In 	ap_callback, set state.last_seq = 0xFFFF (sentinel). Verified against actual is_newer_seq implementation: (0x0000 - 0xFFFF) & 0xFFFF = 1 → accept.
+
+**I1: heap_fraction() Structurally Static — Guards Permanently Dead**
+- **Problem:** heap_fraction() returns (#SPRITE_ROWS * 25 + 244) / 40960 ≈ 0.020 (all compile-time constants). 80% (reduce) and 95% (halt) guards are dead code.
+- **Fix (Aaron-approved):** Made inertness explicit with WARNING comments at both sites (body + render loop). Guards and structure preserved intentionally for future firmware-swap one-line body change.
+
+**I3: pre_attn_mood Could Be Set to ATTENTION (3)**
+- **Problem:** Two sites could stash mood=3 into state.pre_attn_mood, violating invariant that ATTENTION is transient overlay, not underlying mood. On overlay expiry state.mood = state.pre_attn_mood would lock device in ATTENTION forever.
+- **Fix:** Clamp pre_attn_mood to {0, 1, 2} in two sites: on_ble_data (when ttn_timer > 0) and IMU-peak trigger.
+
+**M1: No Range Validation on Host Bytes**
+- **Problem:** state.mood, state.intensity, state.confidence assigned directly from message without clamp.
+- **Fix:** Explicit clamp at acceptance point: mood_in = clamp(msg.mood, 0, 3), intensity_in = clamp(msg.intensity, 0, 100), confidence_in = clamp(msg.confidence, 0, 100).
+
+#### Librarian (Docs + Inference) — M3 + M6
+
+**M6: README.md Stale Test Count**
+- **Problem:** Two references to "190+" remained from Week 2. Week 3 final = 262.
+- **Fix:** Updated both references (§10 status line, §23 shipped deliverables) to "262".
+
+**M3: load_baseline() — No Size Guard Before Read**
+- **Problem:** path.read_text() had no cap; corrupt/malicious/symlinked baseline.json could exhaust host memory before validation.
+- **Fix:** Added pre-read stat() check. If st_size > 4096, raises ValueError (caught by existing exception handler, returns None). 4 KB = 33× headroom for valid ~120-byte baseline.
+
+#### Juanita (Test Infrastructure) — M5
+
+**M5: Tautological Confidence-Gate Test**
+- **Problem:** 	est_gate_is_strict_less_than_not_less_than_or_equal manually constructed MoodResult with gated=(CONFIDENCE_GATE < CONFIDENCE_GATE) — never called compute_mood, never exercised gating logic.
+- **Fix:** Replaced with four real compute_mood calls straddling gate (0.7): stressed+both_ok (0.80→False), stressed+imu_fail (0.56→True), stressed+mic_fail (0.48→True), neutral+both_ok (0.60→True). Cross-check: esult.gated == (result.confidence < CONFIDENCE_GATE) catches future < → <= regression.
+
+---
+
+### Cycle 2 Re-Review & Cleanup
+
+**Cycle 2 Personas:** Correctness, Skeptic, Architect. **All findings from Cycle 1 re-verified as ADDRESSED.**
+
+**Residual Work (Architect Catch):** Deleted dead print_onboarding() from main.py (stale from B1 refactor, no production caller).
+
+**Final Test Status:** 265 passed.
+
+---
+
+### Phase-2 Advisory (Deferred)
+
+**Skeptic finding:** Reset-epoch BLE-timing edge. When device receives FAMILIAR_RESET (0x01) opcode and simultaneously drops BLE connection, the device's resetting state.last_seq = 0xFFFF could race with a reconnection attempt. **Severity:** LOW. **Mitigation:** Host-side seq.reset() is idempotent; brief double-reset on reconnect is harmless. **Defer:** Phase 2 timing model refinement.
+
+---
+
+### Carry-Forward Items — Phase-2 Deferral & Closure
+
+| Item | Source | Disposition |
+|------|--------|-------------|
+| **Baseline verbose print** (P2-4) | Raven TDD | ✅ **CLOSED** — I2 fix replaces leaked stats with activation state only. |
+| **Heap host-visibility wire field** | Architect | → Phase 2 (firmware-swap integration). |
+| **Hardware threshold calibration** | Y.T. notes | → Phase 2 (ambient-sensing extension). |
+| **Reset-flag thread-safety** | Skeptic | → Phase 2 (multi-threaded host if adopted). |
+
+---
+
+### Branch & Next Step
+
+**Branch:** synesthetic-familiar/week3-its-alive  
+**Commit:** 6808c96 (host+tests B1+I2), 068a405 (device B2+I1+I3+M1), c81f9c0 (cleanup)  
+**Final Test:** 265 passed (0.39s)  
+**Decision:** Ready for ship-to-pr. Push branch, open PR, request Copilot code review, then cloud-review-cycle, then squash-merge to main.
+

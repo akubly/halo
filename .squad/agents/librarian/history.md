@@ -43,3 +43,31 @@
 **Decision record:** librarian-week3-docs.md merged to decisions.md.
 
 📌 Team update (2026-06-14T05:36:23Z): Da5id eye dilation addendum INCLUDED (§6 Q1); Y.T. activation gate bound; Ng ATTENTION visuals shipped; Raven privacy APPROVED all surfaces; Juanita 72 new tests; 262 tests green — docs now in sync with Week 3 reality — decided by Da5id, Y.T., Ng, Raven, Juanita
+
+## Week 3 PR — Persona-Review Cycle 1 Fixes (2026-06-13)
+
+**Triggered by:** Aaron Kubly after Cycle 1 persona review of branch `synesthetic-familiar/week3-its-alive`.
+
+### M6 — README.md test count corrected
+- Stale "190+" references (2 occurrences) updated to "262".
+- Files touched: `projects/synesthetic-familiar/README.md` only.
+
+### M3 — load_baseline() size guard
+- Added pre-read `path.stat().st_size > 4096` check inside the existing `try` block in `host/inference.py:load_baseline()`.
+- Falls into the existing `except (OSError, ..., ValueError)` handler → returns `None` + warning log. No new exception surface.
+- Valid baseline is ~120 bytes; 4096 is a 33× margin, generous enough for future minor field additions.
+- `OSError` from a broken symlink on `stat()` is already caught.
+
+**Post-fix pytest:** 262 passed, 0 failed (0.42 s). No test adjustments needed.
+
+**Decision record:** `.squad/decisions/inbox/librarian-week3-review-fixes.md`
+
+---
+
+### Cycle 2 Re-Review (2026-06-14)
+
+**Team decision:** All Cycle 1 findings (M3, M6) verified ADDRESSED in Cycle 2 re-review (Correctness, Skeptic, Architect panels). Docs now in sync with Week 3 reality. Final: 265 tests passing.
+
+**Ready for ship-to-pr:** Push branch `synesthetic-familiar/week3-its-alive`, open PR, request Copilot review, then cloud-review-cycle, then squash-merge.
+
+**Phase-2 deferral:** Heap host-visibility wire field (infrastructure).

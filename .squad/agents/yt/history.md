@@ -202,3 +202,53 @@ create `host/onboarding.py` for first-launch/returning-user flows.
 
 
 📌 Team update (2026-06-14T05:36:23Z): Raven identified P2-4 (stdout print → --verbose); Librarian docs synced to Week 3 reality; 262 tests green; privacy audit APPROVED — ready for ship — decided by Raven, Librarian
+
+---
+
+### Session 2026-06-13 — Week 3 Persona-Review Cycle 1 Fixes
+
+**Trigger:** Aaron approved fixes from Cycle 1 review findings on branch `synesthetic-familiar/week3-its-alive`.
+
+**B1 — Onboarding dual-implementation (BLOCKING, RESOLVED):**  
+`host/onboarding.py` had a correct sentinel-file strategy fully tested but never
+wired into `run()`. `run()` was using a `baseline is None` proxy that caused the
+welcome banner to repeat on every launch until the user accumulated 50 samples
+(potentially days). Fixed by importing `is_first_launch / run_first_launch_flow /
+run_returning_flow` from `host.onboarding` and making them the single onboarding
+path in `run()`. Added `baseline_path: Path` as an injectable parameter so tests
+can use `tmp_path`. Sentinel is written on first run — detection is now durable.
+
+Added integration test class `TestRunOnboardingIntegration` (3 tests) that drives
+`run()` end-to-end and proves: first launch shows banner, second launch shows
+status, banner never repeats.
+
+**I2 — `get_calibration_status()` leaking raw mean/stddev (IMPORTANT, RESOLVED):**  
+Removed `mean={baseline.mean:.3f}, stddev={baseline.stddev:.3f}` from the
+user-facing personalized status string. Status now shows activation state +
+sample count only. Closes Raven P2-4.
+
+**MINOR — `_send_neutral_reset` missing `rng` (RESOLVED):**  
+Added `rng: random.Random | None = None`, matching `_send_neutral_fallback`.
+
+**MINOR — Unused imports `ACTIVATION_THRESHOLD`, `ActivationInfo` (RESOLVED):**  
+Removed from inference import block. Not referenced in main.py body.
+
+**Lesson learned:** Writing `host/onboarding.py` without wiring it into `run()`
+left a tested-but-dead module. Integration tests that drive `run()` end-to-end
+would have caught this immediately. Going forward: for every new module I
+introduce, add at least one integration test that calls through the production
+entry point, not just unit tests on the module itself.
+
+**Final test count:** 265 passed in 0.39s (3 new integration tests green).
+
+**Fix note:** `.squad/decisions/inbox/yt-week3-review-fixes.md`
+
+---
+
+### Cycle 2 Re-Review (2026-06-14)
+
+**Team decision:** All Cycle 1 findings (B1, I2, minors) verified ADDRESSED in Cycle 2 re-review (Correctness, Skeptic, Architect panels). Architect removed dead `print_onboarding()` from main.py (stale from B1 refactor). Final: 265 tests passing.
+
+**Ready for ship-to-pr:** Push branch `synesthetic-familiar/week3-its-alive`, open PR, request Copilot review, then cloud-review-cycle, then squash-merge.
+
+**Phase-2 deferral:** Reset-flag thread-safety (if multi-threaded host adopted).

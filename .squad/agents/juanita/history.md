@@ -53,3 +53,56 @@
 
 
 📌 Team update (2026-06-14T05:36:23Z): Raven privacy audit APPROVED all surfaces; Ng shipped ATTENTION visuals; Y.T. host complete; docs synced (Librarian); 262 tests green — ready for ship — decided by Raven, Ng, Y.T., Librarian
+
+---
+
+## 2026-06-13 — Week 3 Persona-Review Fix (Cycle 1) — [MINOR M5]
+
+**File:** `tests/test_week3_threshold_tuning.py` only.
+
+### Finding fixed
+
+`test_gate_is_strict_less_than_not_less_than_or_equal` was a tautology: it
+constructed `MoodResult` manually with `gated=(CONFIDENCE_GATE < CONFIDENCE_GATE)`
+(always `False`) and asserted that field.  `compute_mood` was never called.
+
+### Fix
+
+Replaced with four real `compute_mood` calls producing confidence values that
+straddle `CONFIDENCE_GATE` (0.7) from both sides:
+
+| Inputs | Confidence | gated |
+|--------|-----------|-------|
+| stressed + both ok | 0.80 | `False` |
+| stressed + imu_ok=False | 0.56 | `True` |
+| stressed + mic_ok=False | 0.48 | `True` |
+| neutral + both ok | 0.60 | `True` |
+
+Each case includes a cross-check `result.gated == (result.confidence < CONFIDENCE_GATE)`
+to guard against any future `<` → `<=` regression in `inference.py`.
+
+Confidence == 0.7 is not reachable via normal `compute_mood` inputs (discrete levels
+noted in lessons below).
+
+### Result
+
+**40/40 tests passed** (0.09 s).  All other tests untouched.
+
+### Durable lessons
+
+- **Reject tautologies:** any test that constructs the production dataclass and passes
+  the same field it then asserts is testing itself, not the production code.
+- **When exact boundary isn't reachable:** straddle from both sides + cross-check
+  `result.field == formula(result.inputs)` to catch future regressions that land on the boundary.
+- **compute_mood discrete confidence levels (2026-06-13):**
+  0.8, 0.56, 0.48, 0.336 (stressed/calm combos); 0.6, 0.42, 0.36, 0.252 (neutral combos).
+
+---
+
+### Cycle 2 Re-Review (2026-06-14)
+
+**Team decision:** All Cycle 1 findings (M5) verified ADDRESSED in Cycle 2 re-review (Correctness, Skeptic, Architect panels). Tautological test replaced with real boundary-straddling cases. Final: 265 tests passing.
+
+**Ready for ship-to-pr:** Push branch `synesthetic-familiar/week3-its-alive`, open PR, request Copilot review, then cloud-review-cycle, then squash-merge.
+
+**Phase-2 deferral:** Multi-threaded host test strategy (if adopted).
