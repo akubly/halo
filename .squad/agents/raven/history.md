@@ -61,3 +61,5 @@ Archived in `.squad/agents/raven/history-archive-detailed.md` (detailed threat i
 
 
 📌 Team update (2026-06-14T05:36:23Z): Da5id eye dilation INCLUDED (§6 Q1); host bind-up + onboarding complete (Y.T.); ATTENTION visuals shipped (Ng); 262 tests green (Juanita); docs synced (Librarian) — all surfaces APPROVED, ship ready — decided by Da5id, Y.T., Ng, Juanita, Librarian
+
+📌 Team update (2026-06-14T07:59:43Z): Phase-2 plan drafted (camera + cloud refinement) — pending Aaron approval. Decisions: Enzo (capability scope), Hiro (architecture). No code written. Affected: implementation lead (Ng), privacy review (Raven), docs (Librarian), testing (Juanita), infrastructure (Da5id).

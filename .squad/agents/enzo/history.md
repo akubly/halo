@@ -112,6 +112,44 @@ See `.squad/agents/enzo/ideation-2026-06-02.md` for full brainstorm.
 
 ---
 
+## Phase 2 PRD Scope — 2026-06-14
+
+**Task:** Produce Phase-2 PRD for VESPER capability expansion (camera input + cloud refinement).
+
+**Key scope decisions made:**
+
+| Decision | Outcome |
+|----------|---------|
+| Phase 2 milestone focus | Camera input ("does it see me?") + Cloud refinement ("does it know me over time?") |
+| Privacy tension surfaced | Both features directly challenge Phase 1's "no cloud egress / no camera" promise — Raven review is a hard gate |
+| Cloud options framed | B1 (local only), B2 (federated), B3 (opt-in sync) — B4 (full cloud) killed outright |
+| Camera options framed | A1 (on-device only), A2 (host-local only), A3 (opt-in cloud) — raw frame upload killed |
+| Parked from Phase 2 | Peer-to-peer sharing, community sprite upload, cross-device roaming, on-device ML |
+| Killed outright | Full cloud inference, raw audio/video upload, Web BT parity |
+| Weekly cadence | Week 4 "It sees", Week 5 "It sees me", Week 6 "It knows me", Week 7 "It grows" |
+
+**Privacy framing:** Phase 1's positioning as "no data leaves device" is a competitive differentiator. Camera + cloud can erode that if not architecturally contained. The bet is whether inference quality gain outweighs brand promise cost.
+
+**Open questions for Aaron (OQ-1 through OQ-6):** Camera build/park, cloud path, VESPER brand positioning, LESC priority, sprite evolution scope, test strategy extension.
+
+**Raven gates:** OQ-1, OQ-2, OQ-3 — no camera or cloud implementation starts without Raven approval.
+
+**Key file paths:**
+- PRD draft: `.squad/files/phase2-prd-draft.md`
+- Decision record: `.squad/decisions/inbox/enzo-phase2-capability-scope.md`
+- ARD references: `docs/projects/synesthetic-familiar/ARD.md` §7 (Decisions 1 & 2), §5.4, §5.6
+- Phase 1 deferral record: `decisions.md` lines 44–50, 775
+
+## Learnings
+
+- Phase 1 delivered: mic + IMU, local heuristic, abstract-with-eyes sprite, 265 tests, Welford baseline persisted to `~/.vesper/baseline.json`
+- Camera deferral reason: recording indicator mandate + privacy overhead + dev complexity — "not justified for v1 playground"
+- Cloud deferral reason: latency (500-2000ms breaks "alive" illusion) + privacy (no telemetry) + hybrid path deferred to Phase 2
+- ARD explicitly noted 48×48 sprite as Phase 2 expansion (§5.5), LESC BLE as Phase 2 should-consider (§5.6), cloud sync as Phase 2 may-migrate (§5.4)
+- Brand tension: "no cloud" is a differentiator vs. the Gemini-heavy ecosystem — Phase 2 must decide whether to preserve or evolve that stance
+
+---
+
 ## Codename Brainstorm — 2026-06-08
 
 Pitched product-lens codename candidates for the Synesthetic Familiar. Team converged on **PULSE** (4 agents independently nominated variants). Official project codename now PULSE. See `.squad/orchestration-log/2026-06-08T07-17Z-codename-brainstorm.md`.

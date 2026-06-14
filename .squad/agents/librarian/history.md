@@ -97,3 +97,5 @@
 **Rule of thumb:** If the number will change every time a developer adds a test, it does not belong in a spec doc. It belongs in CI output or a README badge.
 
 **Decision record:** `.squad/decisions/inbox/librarian-pr4-copilot-fixes.md`
+
+📌 Team update (2026-06-14T07:59:43Z): Phase-2 plan drafted (camera + cloud refinement) — pending Aaron approval. Decisions: Enzo (capability scope), Hiro (architecture). No code written. Affected: implementation lead (Ng), privacy review (Raven), docs (Librarian), testing (Juanita), infrastructure (Da5id).

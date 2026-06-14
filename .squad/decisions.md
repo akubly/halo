@@ -3404,3 +3404,124 @@ This is now internally consistent with the FakeClock timing section, the inline
 
 All 265 tests green. No behavior change confirmed.
 
+
+---
+
+# Decision: VESPER Phase 2 Capability Scope
+
+| Field | Value |
+|-------|-------|
+| **Author** | Enzo (Product / PM) |
+| **Date** | 2026-06-14 |
+| **Status** | PROPOSED — awaiting Aaron decision on OQ-1 through OQ-3 |
+| **Scope** | VESPER (Synesthetic Familiar) — Phase 2 milestone |
+| **Reference** | `.squad/files/phase2-prd-draft.md` |
+
+---
+
+## Decision
+
+Phase 2 milestone focus is **Capability Expansion: camera input + cloud refinement**, as selected by Aaron post-PR #4 merge.
+
+Both features were explicitly deferred from Phase 1 with documented rationale. Phase 1 proved the "alive" feeling core loop. Phase 2 deepens inference quality and longitudinal knowing.
+
+---
+
+## What's IN
+
+- Camera capture pipeline (host-local, visual features only — no raw frame storage)
+- Privacy indicator + consent UX for camera
+- Camera-augmented mood inference
+- Extended local baseline or opt-in cloud baseline sync (path TBD — OQ-2)
+- LESC BLE encryption (ARD §5.6 Phase 2 flag)
+- 48×48 sprite expansion (ARD §5.5 Phase 2 note)
+- CI cloud-import guard
+
+## What's PARKED
+
+- Peer-to-peer mood sharing
+- Community sprite upload
+- Cross-device roaming
+- Personality sliders / creature evolution (Week 7 stretch goal)
+
+## What's KILLED
+
+- Full cloud inference (raw features to cloud) — hard no
+- On-device ML (M55 NPU TFLite) — SDK not ready
+- Raw audio/video upload — direct contradiction of privacy promise
+- Web Bluetooth parity — wrong Phase 2 bet
+
+---
+
+## Privacy Gate — Hard Stop
+
+⛔ **Raven review is required before any camera or cloud implementation begins.**
+
+The following open questions must be resolved by Aaron + Raven before build starts:
+
+| OQ | Question | Stakes |
+|----|----------|--------|
+| OQ-1 | Camera: build or park? Which architecture option (A1/A2/A3)? | Recording indicator mandate; privacy overhead |
+| OQ-2 | Cloud refinement: which path (B1/B2/B3)? | Cloud egress vs. brand promise |
+| OQ-3 | Is VESPER still positioned as "no cloud"? | Brand differentiator vs. inference quality |
+
+**This decision record is parked until OQ-1 through OQ-3 are answered.**
+
+---
+
+## Rationale
+
+Phase 1's positioning ("no data leaves device") is a genuine competitive differentiator in a Gemini-heavy ecosystem. Camera and cloud are both high-value capabilities and high-risk to that positioning. The bet is not whether to add capability — it's whether we can add it without becoming the thing we aren't. That's Aaron's call, with Raven's input.
+
+---
+
+*Enzo — Product/PM | 2026-06-14*
+
+---
+
+# Decision: Phase 2 Capability Architecture — Camera Input + Cloud Refinement
+
+| Field | Value |
+|-------|-------|
+| **Date** | 2026-06-14 |
+| **Author** | Hiro (Architect) |
+| **Status** | DRAFT — awaiting Aaron review |
+| **Artifact** | `.squad/files/phase2-architecture-draft.md` |
+
+## Summary
+
+Phase-2 architecture proposal for adding camera input and cloud refinement to the Synesthetic Familiar (VESPER).
+
+### Camera Input
+- Camera enters as a **third modality** alongside mic + IMU, feeding into the existing mood heuristic on host
+- `SensorFrame` extended with 3 fields: `visual_activity`, `visual_brightness`, `camera_ok`
+- Camera capture on-device (Halo), JPEG relay to host via BLE, feature extraction on host, buffer zeroed
+- Recommended scope: **scene-level features only** (activity + brightness) — no face detection (Phase 3)
+- Wire format (`FAMILIAR_UPDATE` 6 bytes) unchanged — camera folds into mood heuristic on host side
+- Camera is additive: `camera_ok=False` is default/normal; creature never degrades vs Phase 1
+
+### Cloud Refinement
+- Three options evaluated: (A) opt-in cloud inference fallback, (B) periodic baseline sync, (C) federated local refinement
+- **Recommended: Option C** — no user data egress; population model weights pushed to host via standard update channel
+- Option B (baseline sync) is a natural opt-in extension for multi-device use (Phase 2.5)
+- Option A (cloud inference) rejected for Phase 2 — too much scope, latency issues, privacy egress
+
+### Privacy
+- Phase-1 "no raw egress" promise extended: no per-user data leaves host (Option C)
+- 5 new privacy constraints defined (CAMERA-I1 through MODEL-I5), 2 merge-blocking
+- Camera recording indicator (LED) is merge-blocking SDK gate
+- BLE LESC pairing promoted from deferred to gate (JPEG in transit is interceptable)
+- Egress point inventory mapped for all three options
+
+### Mono-Repo
+- Everything stays in `projects/synesthetic-familiar/` — no shared packages (three-copies rule: only one consumer)
+
+### Open Questions for Aaron
+- Q1: Camera scope — scene-level vs face detection
+- Q2: Cloud option — C (recommended) vs B vs A
+- Q3: BLE LESC — gate vs accept-and-document for playground
+- Q4: Camera frame rate target
+- Q5: Enzo PRD alignment on cloud-powered inference
+
+---
+

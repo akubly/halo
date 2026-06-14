@@ -46,3 +46,5 @@ Aaron approved all four persona-review findings for `device/main.lua`. Applied i
 **Ready for ship-to-pr:** Push branch `synesthetic-familiar/week3-its-alive`, open PR, request Copilot review, then cloud-review-cycle, then squash-merge.
 
 **Phase-2 deferral:** Reset-epoch BLE-timing edge (LOW advisory from Skeptic).
+
+📌 Team update (2026-06-14T07:59:43Z): Phase-2 plan drafted (camera + cloud refinement) — pending Aaron approval. Decisions: Enzo (capability scope), Hiro (architecture). No code written. Affected: implementation lead (Ng), privacy review (Raven), docs (Librarian), testing (Juanita), infrastructure (Da5id).

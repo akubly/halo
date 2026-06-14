@@ -58,6 +58,23 @@
 - Sequenced 4-wave fan-out: gates+non-gate work parallel, device features post-gates, integration, polish
 - Plan approved by Aaron; full fan-out executed 2026-06-13
 
+## Learnings
+
+12. **Camera is additive, never degrading** — design new modalities so their absence is the default state, not an error. `camera_ok=False` means Phase-1 behavior exactly. This prevents regressions when hardware/SDK gaps appear.
+13. **Privacy gates scale with data sensitivity, not feature count** — scene-level visual features (brightness, activity) are LOW privacy risk; face detection is HIGH. The architecture decision isn't "camera yes/no" but "what do you extract from the frame?"
+14. **Cloud options form a spectrum of egress** — Option C (receive population model, send nothing) preserves Phase-1 promise; Option A (send derived features) breaks it. Map the egress points first, then choose the option.
+15. **Three-copies rule held for Phase 2** — camera capture, cloud client, online learning: all single-consumer. No shared packages needed. Resist extraction pressure until a second project needs the same capability.
+
+### Phase 7: Phase-2 Capability Architecture (2026-06-14)
+- Drafted Phase-2 architecture for camera input + cloud refinement
+- Camera enters as third modality in SensorFrame; scene-level features only (no face detection)
+- Recommended Option C (federated local refinement, no user data egress) for cloud
+- Defined 5 new privacy constraints (CAMERA-I1 through MODEL-I5), 2 merge-blocking
+- BLE LESC promoted from deferred to gate (JPEG over unencrypted BLE is interceptable)
+- Everything stays in `projects/synesthetic-familiar/` — no shared packages
+- Artifacts: `.squad/files/phase2-architecture-draft.md`, `.squad/decisions/inbox/hiro-phase2-capability-arch.md`
+- 5 open questions flagged for Aaron; Enzo PRD alignment flagged as scope dependency
+
 ## Full Session History
 
 Archived in `.squad/agents/hiro/history-detailed-2026-06-12.md` (detailed ARD decisions, persona review applications, scaffold creation, integration contract, PRD review passes).
