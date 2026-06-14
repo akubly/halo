@@ -7,7 +7,7 @@
 
 **Project codename:** VESPER  
 **ARD:** `docs/projects/synesthetic-familiar/ARD.md`  
-**Status:** Week 3 "It's alive" complete — 262 tests green, shipped Week 3 implementation
+**Status:** Week 3 "It's alive" complete — 265 tests green, shipped Week 3 implementation
 
 ---
 
@@ -20,7 +20,7 @@ Week 3 milestone "It's alive" complete (2026-06-13):
 - ✅ **Heap monitoring (fallback)** — `frame.system.get_heap_usage()` NOT available; manual proxy (sprite rows + BLE buffer) with 80% reduce / 95% halt thresholds; firmware-swap hook documented
 - ✅ **Host onboarding UX** — first-launch calibration status display, "learning your patterns" flow, ATTENTION trigger display
 - ✅ **Privacy audit** — abstract visuals, no labeled text, on-device inference only, no cloud egress
-- ✅ **262 tests green** — acceptance tests for double-tap reset, baseline activation, heap thresholds, onboarding flow, graceful fallback
+- ✅ **265 tests green** — acceptance tests for double-tap reset, baseline activation, heap thresholds, onboarding flow, graceful fallback
 
 See `.squad/decisions.md` (2026-06-12 & 2026-06-13) for detailed decision records.
 
@@ -40,8 +40,6 @@ See `.squad/decisions.md` (2026-06-12 & 2026-06-13) for detailed decision record
   is transmitted as a 0–100 integer so the device can surface signal
   quality (e.g. dim the creature when confidence is low).  No raw
   biometric values are included.
-
-See ARD §4–§5.5 for full architecture, wire format, and render spec.
 
 See ARD §4–§5.5 for full architecture, wire format, and render spec.
 

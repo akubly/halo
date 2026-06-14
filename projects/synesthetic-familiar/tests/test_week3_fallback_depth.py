@@ -348,7 +348,7 @@ class TestResetDuringFallback:
 
     def test_reset_during_both_fail_sends_neutral_once(self) -> None:
         """
-        8 both-fail frames; FAMILIAR_RESET fires after frame 3.
+        8 both-fail frames; FAMILIAR_RESET fires after frame index 2 (0-indexed).
 
         FakeClock timing:
           Frame 0: both_fail_start = 1.0

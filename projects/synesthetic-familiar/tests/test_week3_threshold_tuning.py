@@ -13,7 +13,6 @@ parametrized groups use plain pytest classes.
 """
 from __future__ import annotations
 
-import math
 import unittest
 
 import pytest

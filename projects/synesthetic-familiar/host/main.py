@@ -30,7 +30,6 @@ import argparse
 import asyncio
 import logging
 import random
-import sys
 import time
 from pathlib import Path
 from typing import AsyncIterator, Awaitable, Callable, Protocol, runtime_checkable
@@ -427,7 +426,7 @@ async def run(
     # Baseline — injectable seam (pass baseline=None for population defaults, e.g. in tests).
     # _LOAD_BASELINE_FROM_DISK sentinel means "load from ~/.vesper/baseline.json" (production).
     if baseline is _LOAD_BASELINE_FROM_DISK:
-        baseline = load_baseline()
+        baseline = load_baseline(baseline_path)
 
     # Week 3 — first-launch onboarding UX, driven by sentinel-file strategy (B1).
     # Detection uses is_first_launch(baseline_path) — not the baseline-is-None proxy —
@@ -529,7 +528,7 @@ async def run(
     finally:
         await sensor_stream.stop()
         if baseline is not None:
-            save_baseline(baseline)
+            save_baseline(baseline, baseline_path)
         await transport.disconnect()
 
 
