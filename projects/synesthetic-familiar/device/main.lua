@@ -208,8 +208,14 @@ local _HEAP_BUDGET = 40 * 1024   -- conservative per-app budget (bytes)
 local _BLE_MTU_MAX = 244         -- worst-case BLE receive buffer (bytes)
 
 local function heap_fraction()
-  -- Manual proxy: known allocation sites at current frame.
-  -- Sprite index table: #SPRITE_ROWS strings × ~25 bytes each.
+  -- WARNING: This proxy is STRUCTURALLY STATIC (~2% of budget) because
+  -- sprite_bytes and _BLE_MTU_MAX are compile-time constants.
+  -- The 80% (reduce) and 95% (halt) guards in the render loop can NEVER fire
+  -- with this implementation.  These thresholds are INACTIVE until GAP-3 is
+  -- resolved (frame.system.get_heap_usage() confirmed in firmware).
+  -- TODO(firmware-swap): replace this body with:
+  --   local u, t = frame.system.get_heap_usage(); return u / t
+  -- (cross-references: GAP-3 note in SDK gap block above, TODO(firmware-swap))
   local sprite_bytes = #SPRITE_ROWS * 25
   return (sprite_bytes + _BLE_MTU_MAX) / _HEAP_BUDGET
 end
@@ -256,16 +262,24 @@ local function on_ble_data(data)
     state.last_seq   = msg.seq
     state.last_rx_t  = frame.time.utc()
     state.accepted   = state.accepted + 1
+    -- Trust boundary (M1): clamp all host-supplied fields at the acceptance point.
+    -- Zero behavior change for in-range inputs; explicit guard against malformed host data.
+    local mood_in       = clamp(msg.mood,       0,   3)
+    local intensity_in  = clamp(msg.intensity,  0, 100)
+    local confidence_in = clamp(msg.confidence, 0, 100)
     -- ATTENTION is an overlay (ARD §5.1 state machine): incoming mood updates
     -- go to pre_attn_mood while the overlay is active so the revert after
     -- ATTENTION_DURATION_S restores the correct underlying state.
     if state.attn_timer > 0 then
-      state.pre_attn_mood = msg.mood
+      -- ATTENTION domain invariant (I3): underlying mood must be in {0,1,2}.
+      -- Treat mood==3 as trigger-only; never stash 3 as pre_attn_mood so
+      -- restore-on-expiry always lands on a real underlying mood, never ATTENTION.
+      state.pre_attn_mood = clamp(mood_in, 0, 2)
     else
-      state.mood = msg.mood
+      state.mood = mood_in
     end
-    state.intensity  = msg.intensity
-    state.confidence = msg.confidence
+    state.intensity  = intensity_in
+    state.confidence = confidence_in
 
     -- ACK every 10 accepted packets (ARD §5.2)
     if state.accepted % ACK_INTERVAL == 0 then
@@ -505,6 +519,10 @@ frame.imu.tap_callback(function()
     state.bob_phase   = 0.0
     state.render_int  = 50.0
     state.attn_timer  = 0.0    -- cancel any in-flight ATTENTION overlay
+    -- Reset dedup sentinel (B2): host calls seq.reset() which restarts at 0x0000.
+    -- Sentinel 0xFFFF → delta=(0x0000-0xFFFF)&0xFFFF=1 → first post-reset packet
+    -- accepted.  Without this reset, stale last_seq silently rejects seq=0.
+    state.last_seq    = 0xFFFF
     -- Notify host (Device→Host, 1 byte, ARD §5.2)
     pcall(frame.bluetooth.send, string.char(0x01))
   end
@@ -535,6 +553,10 @@ while true do
     end
 
     -- ── Heap guard (GAP-3 fallback, ARD §5.1) ───────────────────────────────
+    -- WARNING: heap_fraction() is STRUCTURALLY STATIC (~2%); the 0.95 and 0.80
+    -- thresholds below are INACTIVE until GAP-3 is resolved.  Structure is kept
+    -- intact so the firmware-swap is a one-line body change to heap_fraction().
+    -- See heap_fraction() definition and TODO(firmware-swap) in the GAP-3 note.
     local hf = heap_fraction()
     if hf >= 0.95 then
       -- 95%: graceful halt — blank screen and exit render loop.
@@ -556,7 +578,9 @@ while true do
         local az = imu_raw.accelerometer.z / IMU_SCALE
         local mag = math.sqrt(ax * ax + ay * ay + az * az)
         if mag > IMU_PEAK_THRESH_G then
-          state.pre_attn_mood = state.mood
+          -- ATTENTION domain invariant (I3): clamp to {0,1,2} so restore-on-expiry
+          -- never lands on mood=3, even if host previously set state.mood=3 directly.
+          state.pre_attn_mood = clamp(state.mood, 0, 2)
           state.mood          = 3          -- ATTENTION (ARD §5.1, mood enum [3])
           state.attn_timer    = ATTENTION_DURATION_S
         end
