@@ -165,30 +165,69 @@ class TestConfidenceGateBoundary(unittest.TestCase):
 
     def test_gate_is_strict_less_than_not_less_than_or_equal(self) -> None:
         """
-        The gating formula is `confidence < CONFIDENCE_GATE` (strict).
+        Verifies compute_mood's gating formula is strict '<', not '<='.
 
-        confidence == CONFIDENCE_GATE exactly must be NOT gated.
+        compute_mood's discrete confidence levels are 0.6 (neutral), 0.8
+        (stressed/calm), and their sensor-penalty multiples — none land on
+        exactly 0.7.  We straddle CONFIDENCE_GATE from both sides using real
+        inputs and cross-check that result.gated matches the strict-less-than
+        formula exactly.  If someone changes the formula to '<=' in inference.py,
+        the cross-check assertions will catch it as soon as a value == 0.7 is
+        reachable (or the existing values produce a wrong gated flag).
 
-        We verify the invariant by constructing a MoodResult directly.
-        This pins the strict-less-than semantics so a future refactor of
-        inference.py cannot accidentally change it to <=.
+        Values exercised:
+            0.8  stressed + both ok  → 0.8 >= 0.7  → NOT gated
+            0.56 stressed + imu fail → 0.56 < 0.7  → gated
+            0.48 stressed + mic fail → 0.48 < 0.7  → gated
+            0.6  neutral  + both ok  → 0.6 < 0.7   → gated
         """
-        from host.inference import MoodResult, MOOD_TO_INT
-        # Build a MoodResult at exactly the gate boundary.
-        at_gate = MoodResult(
-            mood="stressed",
-            mood_int=MOOD_TO_INT["stressed"],
-            intensity=0.8,
-            confidence=CONFIDENCE_GATE,       # exactly 0.7
-            gated=(CONFIDENCE_GATE < CONFIDENCE_GATE),  # should be False
-            tension=0.7,
-        )
-        assert at_gate.gated is False, (
-            f"confidence == CONFIDENCE_GATE ({CONFIDENCE_GATE}) must not be gated. "
-            "The gate condition is 'confidence < CONFIDENCE_GATE' (strict). "
-            "If this fails, someone changed the condition to <= — update this test only "
-            "after a team decision to change the semantics."
-        )
+        cases: list[tuple[dict, float, bool]] = [
+            # (kwargs, expected_confidence, expected_gated)
+            (
+                dict(audio_rms=0.5, audio_pitch_variance=1.0,
+                     imu_acceleration=1.0, imu_rotation=1.0,
+                     mic_ok=True, imu_ok=True),
+                0.8, False,
+            ),
+            (
+                dict(audio_rms=0.5, audio_pitch_variance=1.0,
+                     imu_acceleration=1.0, imu_rotation=1.0,
+                     mic_ok=True, imu_ok=False),
+                0.56, True,
+            ),
+            (
+                dict(audio_rms=0.0, audio_pitch_variance=1.0,
+                     imu_acceleration=1.0, imu_rotation=1.0,
+                     mic_ok=False, imu_ok=True),
+                0.48, True,
+            ),
+            (
+                dict(audio_rms=0.5, audio_pitch_variance=0.5,
+                     imu_acceleration=0.5, imu_rotation=0.5,
+                     mic_ok=True, imu_ok=True),
+                0.6, True,
+            ),
+        ]
+        for kwargs, exp_conf, exp_gated in cases:
+            result = compute_mood(**kwargs)
+            assert result.confidence == pytest.approx(exp_conf, abs=1e-9), (
+                f"compute_mood({kwargs}): confidence={result.confidence}, "
+                f"expected {exp_conf}."
+            )
+            assert result.gated is exp_gated, (
+                f"compute_mood({kwargs}): gated={result.gated}, expected {exp_gated}. "
+                f"confidence={result.confidence:.4f}, CONFIDENCE_GATE={CONFIDENCE_GATE}. "
+                "Gate condition must be strict '<' (confidence < CONFIDENCE_GATE)."
+            )
+            # Cross-check: gated must exactly equal the strict-less-than formula.
+            # If inference.py ever changes to '<=', this fires for any case where
+            # confidence == CONFIDENCE_GATE (currently not reachable, but guards
+            # against future confidence-table changes that land on 0.7 exactly).
+            assert result.gated == (result.confidence < CONFIDENCE_GATE), (
+                f"gated field does not match strict '<' formula! "
+                f"gated={result.gated}, confidence={result.confidence}, "
+                f"CONFIDENCE_GATE={CONFIDENCE_GATE}."
+            )
 
 
 # ═════════════════════════════════════════════════════════════════════════════

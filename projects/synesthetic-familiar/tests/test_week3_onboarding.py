@@ -33,6 +33,7 @@ Date: 2026-06-13
 """
 from __future__ import annotations
 
+import asyncio
 import pathlib
 from pathlib import Path
 
@@ -69,6 +70,18 @@ try:
 except ImportError:
     load_baseline = save_baseline = Baseline = None  # type: ignore[assignment]
     _INFERENCE_AVAILABLE = False
+
+# ── run() integration imports ─────────────────────────────────────────────────
+try:
+    from host.main import run
+    from host.sensors import SensorFrame, FakeSensorStream
+    from helpers import FakeTransport, FakeClock, noop_sleep
+    _RUN_INTEGRATION_AVAILABLE = True
+    _RUN_INTEGRATION_ERROR: str | None = None
+except ImportError as _e:
+    run = FakeTransport = FakeClock = noop_sleep = SensorFrame = FakeSensorStream = None  # type: ignore[assignment]
+    _RUN_INTEGRATION_AVAILABLE = False
+    _RUN_INTEGRATION_ERROR = str(_e)
 
 _YT_W3_REASON = (
     "Y.T. Week 3: host/onboarding.py not yet written. "
@@ -349,6 +362,142 @@ class TestOnboardingIntegrationPassingToday:
         )
         assert baseline.sample_count == 42
         assert baseline.mean == pytest.approx(0.41)
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Group 5 — run() → onboarding integration (B1 fix)
+# Proves the PRODUCTION path: run() uses is_first_launch/run_first_launch_flow/
+# run_returning_flow from host.onboarding, NOT the baseline-is-None proxy.
+# ═════════════════════════════════════════════════════════════════════════════
+
+def _good_frame():
+    """SensorFrame that passes confidence gating (both sensors ok, mid-range values)."""
+    return SensorFrame(
+        audio_rms=0.5,
+        audio_pitch_variance=0.5,
+        imu_acceleration=0.5,
+        imu_rotation=0.5,
+        mic_ok=True,
+        imu_ok=True,
+    )
+
+
+class TestRunOnboardingIntegration:
+    """
+    Integration: run(baseline_path=...) → onboarding.py sentinel-file path.
+
+    B1 fix: first-launch detection must use is_first_launch(baseline_path),
+    not baseline is None, so the banner does NOT repeat if the user quits
+    before reaching high-confidence samples.
+    """
+
+    def _skip_if_unavailable(self):
+        if not _RUN_INTEGRATION_AVAILABLE:
+            pytest.skip(f"run() integration seam not importable: {_RUN_INTEGRATION_ERROR}")
+        if not _FIRST_LAUNCH_AVAILABLE:
+            pytest.skip(f"host.onboarding not importable: {_ONBOARDING_IMPORT_ERROR}")
+
+    def test_first_launch_shows_banner(self, tmp_path, capsys):
+        """
+        First run with no sentinel file → first-launch banner printed, sentinel created.
+
+        The banner text must contain 'VESPER' or 'Familiar' (from run_first_launch_flow).
+        After run(), is_first_launch(baseline_path) must return False.
+        """
+        self._skip_if_unavailable()
+        baseline_path = tmp_path / "baseline.json"
+        assert not baseline_path.exists(), "Pre-condition: no sentinel → first launch."
+
+        stream = FakeSensorStream([_good_frame()] * 3)
+        asyncio.run(run(
+            FakeTransport(), stream,
+            sleep=noop_sleep, clock=FakeClock(step=0.1),
+            baseline=None, baseline_path=baseline_path,
+        ))
+
+        captured = capsys.readouterr().out
+        assert any(kw in captured for kw in ("VESPER", "Familiar", "familiar")), (
+            f"First-launch run() must print the VESPER banner (from run_first_launch_flow). "
+            f"Got stdout:\n{captured!r}"
+        )
+        assert baseline_path.exists(), (
+            "run_first_launch_flow must create the sentinel file so the banner "
+            "does not repeat on the next launch. baseline_path was not created."
+        )
+
+    def test_returning_user_shows_status_not_banner(self, tmp_path, capsys):
+        """
+        Second run with sentinel already present → returning-user status line.
+
+        Must print '[VESPER] Familiar online' and must NOT reprint the first-launch
+        banner, even though baseline=None (population defaults, no high-confidence
+        samples yet). This is the core B1 regression fix.
+        """
+        self._skip_if_unavailable()
+        baseline_path = tmp_path / "baseline.json"
+        baseline_path.write_bytes(b"")  # sentinel created on a previous run
+
+        stream = FakeSensorStream([_good_frame()] * 3)
+        asyncio.run(run(
+            FakeTransport(), stream,
+            sleep=noop_sleep, clock=FakeClock(step=0.1),
+            baseline=None, baseline_path=baseline_path,
+        ))
+
+        captured = capsys.readouterr().out
+        assert "[VESPER] Familiar online" in captured, (
+            f"Returning user run() must print '[VESPER] Familiar online — ...' status. "
+            f"Got stdout:\n{captured!r}"
+        )
+        for banner_kw in ("First Launch", "Meet your Familiar", "waking up for the first time"):
+            assert banner_kw not in captured, (
+                f"Returning user must NOT see the first-launch banner. "
+                f"Found {banner_kw!r} in stdout — baseline-is-None proxy still active?\n"
+                f"stdout:\n{captured!r}"
+            )
+
+    def test_banner_not_repeated_on_second_run(self, tmp_path, capsys):
+        """
+        Run twice with same baseline_path — first run shows banner, second shows status.
+
+        This is the repeating-banner regression test. Previously, if a user quit
+        before baseline accumulated 50 samples, baseline remained None on next launch
+        and the banner would repeat. The sentinel-file strategy fixes this.
+        """
+        self._skip_if_unavailable()
+        baseline_path = tmp_path / "baseline.json"
+
+        # First run — first launch
+        stream1 = FakeSensorStream([_good_frame()] * 2)
+        asyncio.run(run(
+            FakeTransport(), stream1,
+            sleep=noop_sleep, clock=FakeClock(step=0.1),
+            baseline=None, baseline_path=baseline_path,
+        ))
+        out1 = capsys.readouterr().out
+
+        # Second run — returning user (still baseline=None; no high-confidence samples yet)
+        stream2 = FakeSensorStream([_good_frame()] * 2)
+        asyncio.run(run(
+            FakeTransport(), stream2,
+            sleep=noop_sleep, clock=FakeClock(step=0.1),
+            baseline=None, baseline_path=baseline_path,
+        ))
+        out2 = capsys.readouterr().out
+
+        # First run should have banner
+        assert any(kw in out1 for kw in ("VESPER", "Familiar", "familiar")), (
+            f"First run must show the first-launch banner. out1:\n{out1!r}"
+        )
+        # Second run must NOT repeat banner — sentinel-file detection fires
+        for banner_kw in ("First Launch", "Meet your Familiar", "waking up for the first time"):
+            assert banner_kw not in out2, (
+                f"Banner must not repeat on second run (B1 regression). "
+                f"Found {banner_kw!r} in second run stdout:\n{out2!r}"
+            )
+        assert "[VESPER] Familiar online" in out2, (
+            f"Second run must show returning-user status. out2:\n{out2!r}"
+        )
 
 
 if __name__ == "__main__":

@@ -20,7 +20,6 @@ Gate 2 helpers (MERGE-BLOCKING — must live here, not in inference or protocol)
 
 Week 3 onboarding helpers (testable — import directly from this module):
   get_calibration_status(baseline) → str
-  print_onboarding(baseline, *, out=None) → None
   run_mock_cycle(transport, *, cycles, sleep) → Coroutine
 
 Owner: Ng / Y.T. (Week 3 onboarding UX)
@@ -33,6 +32,7 @@ import logging
 import random
 import sys
 import time
+from pathlib import Path
 from typing import AsyncIterator, Awaitable, Callable, Protocol, TextIO, runtime_checkable
 
 from host.familiar_protocol import (
@@ -47,8 +47,6 @@ from host.familiar_protocol import (
 )
 from host.sensors import FakeSensorStream, SensorFrame, SensorInitError, SensorStream
 from host.inference import (
-    ACTIVATION_THRESHOLD,
-    ActivationInfo,
     Baseline,
     MoodResult,
     compute_mood,
@@ -57,6 +55,7 @@ from host.inference import (
     save_baseline,
     update_baseline,
 )
+from host.onboarding import is_first_launch, run_first_launch_flow, run_returning_flow
 
 
 logger = logging.getLogger("familiar.host")
@@ -83,6 +82,10 @@ _MOOD_NAME = {0: "NEUTRAL", 1: "CALM", 2: "STRESSED", 3: "ATTENTION"}
 # ~/.vesper/baseline.json.
 _LOAD_BASELINE_FROM_DISK: object = object()
 
+# Default path used for first-launch sentinel detection — matches inference.py's
+# _BASELINE_PATH so both subsystems share the same marker file.
+_DEFAULT_BASELINE_PATH: Path = Path("~/.vesper/baseline.json").expanduser()
+
 # ---------------------------------------------------------------------------
 # Week 3 onboarding helpers (public, testable)
 # ---------------------------------------------------------------------------
@@ -92,17 +95,15 @@ def get_calibration_status(baseline: Baseline | None) -> str:
     Return human-readable calibration state for onboarding and status display.
 
     "calibrating (n / 50 samples)" = population defaults active.
-    "personalized"                  = personal mean+1.5σ threshold active (ARD §5.4).
+    "personalized (n samples)"      = personal mean+1.5σ threshold active (ARD §5.4).
 
     Driven by Librarian's get_activation_info() — pure function, no I/O.
     Testable: inject a Baseline dataclass to drive any state.
+    Raw mean/stddev are NOT surfaced here — activation state + sample count only.
     """
     info = get_activation_info(baseline)
-    if info.state == "personalized" and baseline is not None:
-        return (
-            f"personalized (n={info.sample_count} samples, "
-            f"mean={baseline.mean:.3f}, stddev={baseline.stddev:.3f})"
-        )
+    if info.state == "personalized":
+        return f"personalized ({info.sample_count} samples)"
     return (
         f"calibrating ({info.sample_count} / {info.samples_needed} samples — "
         "population defaults active)"
@@ -381,10 +382,11 @@ async def _send_neutral_fallback(
 async def _send_neutral_reset(
     transport: Transport,
     seq: SequenceCounter,
+    rng: random.Random | None = None,
 ) -> None:
     """FAMILIAR_RESET reaction: send NEUTRAL to resync device state (JUANITA-T2-5 / ARD §5.2)."""
     q_intensity = quantise_intensity(0.5)
-    j_intensity = apply_intensity_jitter(q_intensity)
+    j_intensity = apply_intensity_jitter(q_intensity, rng=rng)
     packet = encode_familiar_update(
         mood=Mood.NEUTRAL,
         intensity=j_intensity,
@@ -409,6 +411,7 @@ async def run(
     clock: Callable[[], float] = time.monotonic,
     sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     baseline: Baseline | None | object = _LOAD_BASELINE_FROM_DISK,
+    baseline_path: Path = _DEFAULT_BASELINE_PATH,
 ) -> None:
     """
     Real sensor→inference→encode→send loop at 10Hz.
@@ -432,6 +435,9 @@ async def run(
                        Default sentinel _LOAD_BASELINE_FROM_DISK loads from
                        ~/.vesper/baseline.json at startup (production path).
                        Tests pass baseline=None to bypass the real file.
+        baseline_path: Path used for sentinel-file first-launch detection.
+                       Default matches ~/.vesper/baseline.json (same file as
+                       inference.py uses).  Tests inject tmp_path/baseline.json.
     """
     seq = SequenceCounter()
 
@@ -451,8 +457,15 @@ async def run(
     if baseline is _LOAD_BASELINE_FROM_DISK:
         baseline = load_baseline()
 
-    # Week 3 — first-launch onboarding UX (print to stdout; CLI playground).
-    print_onboarding(baseline)
+    # Week 3 — first-launch onboarding UX, driven by sentinel-file strategy (B1).
+    # Detection uses is_first_launch(baseline_path) — not the baseline-is-None proxy —
+    # so the banner never repeats even if the user quits before reaching high-confidence
+    # samples (the sentinel is written on first run, not after calibration completes).
+    if is_first_launch(baseline_path):
+        run_first_launch_flow(baseline_path)
+    else:
+        run_returning_flow(baseline)
+        print(f"\n[VESPER] Familiar online — {get_calibration_status(baseline)}\n")
 
     transport.on_receive(_make_device_msg_handler(_reset_flag))
     await transport.connect()

@@ -105,6 +105,11 @@ class ActivationInfo:
 def load_baseline(path: Path = _BASELINE_PATH) -> Baseline | None:
     """Load baseline from disk. Returns None if file is missing or corrupt."""
     try:
+        file_size = path.stat().st_size
+        if file_size > 4096:
+            raise ValueError(
+                f"baseline file too large ({file_size} bytes > 4096 byte limit) — skipping read"
+            )
         data = json.loads(path.read_text(encoding="utf-8"))
         b = Baseline(**data)
         # Validate field types and values — rejects hostile/corrupt JSON that would
