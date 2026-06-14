@@ -1,178 +1,108 @@
-# Project Context
+# Juanita — QA/Test Specialist (Archived History Summary)
 
-- **Owner:** Aaron Kubly
-- **Project:** halo — mono-repo playground for authoring apps on Halo smart glasses
-- **My layer:** Tests, test infra, edge cases, correctness review
-- **Testing reality:** BLE is flaky by nature; hardware-in-the-loop tests are slow — mock when possible, real device when necessary
-- **Created:** 2026-06-01
+**Owner:** Aaron Kubly | **Project:** halo mono-repo | **Role:** Tests, test infra, edge cases, correctness review
 
-## Session 2026-06-08: VESPER Test Strategy Rev 2 — All 11 Findings Closed
+## Pre-Week-3 Context (Archived)
 
-- Revised TEST-STRATEGY.md: B1/B2/B3 blocking (heap device-only, wire format LE/dedup, false-positive bug fixed), I4–I10 important (methodology framing, acceptance test decoupling, ownership clarity, privacy/jitter, Lua authority, quick-reset spec, story mapping), M11 minor (Appendix A split resolved/open). Review-driven remediation complete; test suite buildable.
+**Week 1 (2026-06-09):** Learned `--cov-fail-under` without `--cov=<module>` is silently ignored; selective gate on critical modules (familiar_protocol.py at 95%) more honest than blunt global threshold.
 
-## Learnings
+**Week 2 (2026-06-10):** Delivered 47 new tests across 6 files (101 total, all green). Privacy gate I7, familiar-update Gate 1, intensity quantise/jitter Gate 2, confidence-hold I2, both-fail fallback all verified. Extracted FakeClock/FakeSensorStream/FakeTransport to `tests/helpers.py`.
 
-### London-School Honest Framing (2026-06-08)
-- Claiming "everything is mockist" is dishonest. Pure-function tests are DELIBERATELY classicist — value transformation with no collaborators to mock.
-- Only acceptance tests are London-school / mockist.
-- Orchestration lives in FamiliarApp, not in inference.
+**W2 Review-Fix Cycle (2026-06-12):** 5 regressions documented + fixed: B1 (tension vs intensity in baseline), B2 (SensorStream pacing removed), I1 (load_baseline fail-safe), I5 (_send_neutral_fallback pipeline), M6 (test double deduplication).
 
-### Wire-Format Alignment (2026-06-08)
-- ALL multi-byte fields are LITTLE-ENDIAN.
-- Seq dedup: signed-16 delta window.
-- FAMILIAR_RESET: Device→Host ONLY.
-- FAMILIAR_ACK: Auto every 10 packets, seq-only.
+## Week 3 Acceptance Suite (2026-06-13)
 
-### Heap Ownership is Device-Only (2026-06-08)
-- Heap management entirely Lua-side. No heap state on wire.
+**Phase 1 — Reset + Activation + Onboarding (48 tests → 176 passing total)**
 
-### Quick-Reset is Device-Originated (2026-06-08)
-- Double-tap detected on-device, device snaps to NEUTRAL locally (no host round-trip).
+| File | Tests | Focus |
+|------|-------|-------|
+| `test_week3_reset.py` | 17 | FAMILIAR_RESET protocol (14✓) + host-reaction contract (3 xfail→Ng) + W3-1 snapshot zeroing (2✓) |
+| `test_week3_baseline_activation.py` | 34 | Activation gate @ sample_count ≥ 50 (all passing; Librarian landed) |
+| `test_week3_onboarding.py` | 13 | 2 passing (load_baseline), 11 skipped (pending Y.T. host/onboarding.py) |
 
-## Session 2026-06-09: VESPER Week 1 Integration & Test Suite Delivery
+**Key discoveries:** Librarian had already landed ACTIVATION_THRESHOLD=50; main.py logs FAMILIAR_RESET but has no host-reaction logic (xfail gates Ng); get_activation_info() exportable by Y.T.
 
-**Test suite delivered:** 54 paranoid tests in projects/synesthetic-familiar/tests/test_protocol.py.
+**Phase 2 — Fallback Depth + Threshold Tuning (72 new tests → 262 total)**
 
-**Integration reconciliation event:**
-- Initial contract mismatch: tests expected Mood IntEnum + seq_is_newer export from Ng's protocol module
-- Ng coordinated alignment and added both exports without changing test file
-- **Result:** Test expectations locked as canonical. 54 tests now pass, 0 skipped.
+| File | Tests | Focus |
+|------|-------|-------|
+| `test_week3_fallback_depth.py` | 9 | Timeout boundaries (strict >), recovery after fallback, RESET-during-both-fail |
+| `test_week3_threshold_tuning.py` | 37 | Confidence gate strict <, activation 49/50/51 boundary, quantisation 10-point parametrize, jitter ±5 clamping (55 exhaustive) |
+| `test_week3_ble_flake.py` | 26 | Garbled device bytes (10 parametrized), extreme/NaN/Inf sensor values, heap-guard gap structural test |
 
-**Critical insight:** Tests == executable specification. The test contract defines what the wire format means. Ng's implementation must match test expectations, not the other way around.
+**Result:** 262 tests all green. No rejections — all contracts (both-fail, confidence-hold, activation, quantisation, jitter, BLE flake) correct in code.
 
-**Outcome:** 54-test green. Wire format fully verified. Ready for hardware validation.
+**Heap-guard finding:** FamiliarAck has no heap field. Test `test_familiar_ack_has_no_heap_field` is a structural anchor — fails if Ng adds heap field, prompting host-side handler review.
 
-## Session 2026-06-09: VESPER Test Strategy Rev 3 — Persona-Review Remediation Wave
+**Decision record:** `juanita-week3-fallback.md` merged to decisions.md.
 
-Applied 9 persona-review findings to TEST-STRATEGY.md. All changes surgical; mixed-methodology framing preserved.
 
-## Learnings (continued)
 
-### Parametrize beats Hypothesis for boundary coverage (2026-06-09)
-- `hypothesis` is heavyweight for a pure-function heuristic with known boundaries. An explicit `@pytest.mark.parametrize` table (~8 rows covering nominal + boundary per mood) is easier to read, faster to run, and requires no extra dependency. Use hypothesis only when you cannot enumerate the input space.
+**Test-first 48 new tests delivered across 3 files. Suite: 176 passing, 3 xfailed (Ng contract), 11 skipped (Y.T. pending).**
 
-### `busted` is the SOLE Lua authority — no Python-clone oracles (2026-06-09)
-- A Python reimplementation of Lua state machine logic (LuaStateMachineSim) only validates itself. It says nothing about production Lua. If cross-language fuzz is needed in Phase-2, drive it through a real Lua interpreter (busted fixtures or subprocess). Never substitute a Python clone.
+**Acceptance-test gates documented for all team members:**
+- Ng: FAMILIAR_RESET must trigger NEUTRAL send + seq reset in async loop (xfail gates the PR)
+- Librarian: ACTIVATION_THRESHOLD must use >= (not >); no baseline=None revert; confidence gating intact (34 tests gate merge)
+- Y.T.: is_first_launch() pure; marker file created; no hardcoded ~/.vesper paths (tests gate module creation)
+- Infrastructure: finally block + samples[:]=0.0 must remain (W3-1 structural gates merge)
 
-### ATTENTION is overlay-and-restore, NOT overlay-and-neutral (2026-06-09)
-- on_imu_peak() overlays ATTENTION briefly (<=500ms), then restores the *previous* mood (e.g., STRESSED → ATTENTION → STRESSED). It does NOT reset to NEUTRAL. This is architecturally important: ATTENTION is ephemeral emphasis, not a mood transition.
+**Key achievement:** 100% test coverage of Week 3 gate contracts. Tests are ready to drive implementation as each team member ships.
 
-### Confidence-hold timeout belongs in Phase-1 (2026-06-09)
-- The "stuck creature" scenario (prolonged sub-0.7 confidence → creature frozen) is a Phase-1 UX failure, not a Phase-2 enhancement. After ~30s of gated silence, re-send the last confirmed mood. FakeClock-driven tests can cover this without time.sleep().
+**Decision file:** `.squad/decisions.md` (merged from `.squad/decisions/inbox/juanita-week3-tests.md`)
 
-### Global coverage gates are a false safety signal (2026-06-09)
-- `--cov-fail-under=90` on the whole test suite can pass with 100% coverage of trivial files masking 60% on critical ones. A selective gate on the single most important module (familiar_protocol.py at 95%) is more honest and actionable than a blunt global threshold.
 
-## Learnings
-- `--cov-fail-under` without `--cov=<module>` is silently ignored by pytest-cov; always pair them: `pytest --cov=<module> --cov-fail-under=N <test_file>` (2026-06-09, T7 PR review).
 
-## Session 2026-06-10: VESPER Week 2 Test Suite Delivery
+📌 Team update (2026-06-14T05:36:23Z): Raven privacy audit APPROVED all surfaces; Ng shipped ATTENTION visuals; Y.T. host complete; docs synced (Librarian); 262 tests green — ready for ship — decided by Raven, Ng, Y.T., Librarian
 
-**Test suite delivered:** 47 new tests across 6 files. Total suite: 101 tests, all green.
+---
 
-**New / modified files:**
-- `tests/test_inference.py` — 5 de-xfailed + 5 boundary parametrize tests (compute_mood contract)
-- `tests/test_sensors.py` (NEW) — 3 tests covering Gate I7 (SensorSourcePort privacy)
-- `tests/test_protocol.py` — `test_familiar_update_carries_no_raw_biometric_values` added (Gate 1)
-- `tests/test_main.py` (NEW) — 15 tests covering Gate 2 (quantise_intensity + apply_intensity_jitter)
-- `tests/test_confidence_gating.py` (NEW) — 1 test for I2 confidence-hold timeout (30s, injectable clock)
-- `tests/test_fallback.py` (NEW) — 1 test for both-sensors-fail NEUTRAL fallback (10s, injectable clock)
+## 2026-06-13 — Week 3 Persona-Review Fix (Cycle 1) — [MINOR M5]
 
-**Gate coverage:**
-- Gate I7 (merge-blocking): `test_sensor_source_port_exposes_no_raw_audio` — COVERED, PASSES
-- Gate 1 (merge-blocking): `test_familiar_update_carries_no_raw_biometric_values` — COVERED, PASSES
-- Gate 2 (merge-blocking): `test_intensity_quantised_before_encode` + `test_intensity_jitter_applied_before_encode` — COVERED, PASSES
-- I2 (confidence-hold timeout): `test_confidence_hold_timeout_resends_after_30s` — COVERED, PASSES
-- ARD §5.4 (both-fail fallback): `test_both_sensors_fail_sends_neutral_after_10s` — COVERED, PASSES
+**File:** `tests/test_week3_threshold_tuning.py` only.
 
-**No rejections:** Ng and Librarian landed complete Week 2 implementations. All contract invariants met.
+### Finding fixed
 
-## Learnings
+`test_gate_is_strict_less_than_not_less_than_or_equal` was a tautology: it
+constructed `MoodResult` manually with `gated=(CONFIDENCE_GATE < CONFIDENCE_GATE)`
+(always `False`) and asserted that field.  `compute_mood` was never called.
 
-### Week 2 test surface (2026-06-10)
-- inference.py tested as a pure function (classicist): 5 mandatory + 5 boundary parametrize tests cover all mood transitions, sensor-failure paths, and confidence gating.
-- sensors.py tested via dataclass introspection: `dataclasses.fields()` + type annotation inspection is sufficient to enforce the SensorSourcePort privacy gate without running hardware.
-- protocol.py Gate 1 uses `inspect.signature()` — checking param names is faster and more reliable than testing function behavior.
-- main.py Gate 2 uses injectable FixedRng (duck-typed `randint` object) to test exact clamp behavior without RNG state dependencies.
+### Fix
 
-### Injectable-clock harness for main-loop timeout tests (2026-06-10)
-- I2 (30s confidence-hold) and ARD §5.4 (10s both-fail) tests drive the main loop with injectable clock (`clock` kwarg to `run()`) + FakeTransport + FakeSensorStream.
-- FakeClock with `step=1.0` advances 1s per clock() call. With 2 calls per normal frame, 40 frames covers 40s > 30s timeout. For the both-fail path (1 call per frame, `continue` skips elapsed), 15 frames × 1.0s = 15s > 10s timeout.
-- FakeSensorStream.start() must be called before iteration; this is Ng's pattern from sensors.py's own FakeSensorStream.
-- Timer re-arm: after a timeout send, `both_fail_start = tick_start` and `last_send_time = tick_start` reset the windows. Test verifies exactly 1 send in the first N frames.
+Replaced with four real `compute_mood` calls producing confidence values that
+straddle `CONFIDENCE_GATE` (0.7) from both sides:
 
-### Librarian's neutral-zone confidence design (2026-06-10)
-- `compute_mood()` returns `confidence=0.6` for the neutral tension band (0.35–0.65). Since `CONFIDENCE_GATE=0.7`, ALL neutral readings are gated (even with both sensors ok). This is an intentional design: the neutral zone is ambiguous, so the creature only transitions to calm/stressed (confidence=0.8 > gate). Neutral updates only fire via the 30s timeout. Tests confirm this via test_confidence_gate_sets_gated_true.
+| Inputs | Confidence | gated |
+|--------|-----------|-------|
+| stressed + both ok | 0.80 | `False` |
+| stressed + imu_ok=False | 0.56 | `True` |
+| stressed + mic_ok=False | 0.48 | `True` |
+| neutral + both ok | 0.60 | `True` |
 
-### Strict vs non-strict threshold boundary (2026-06-10)
-- Contract specifies `STRESS_THRESHOLD=0.65` but NOT whether the comparison is `>` or `>=`. Librarian chose strict `>`. At exactly `tension=0.65`, mood is "neutral" not "stressed". Documented in decision juanita-week2-tests.md; no rejection because spec is silent on boundary direction.
+Each case includes a cross-check `result.gated == (result.confidence < CONFIDENCE_GATE)`
+to guard against any future `<` → `<=` regression in `inference.py`.
 
-### pytest.mark.parametrize on unittest.TestCase methods silently fails (2026-06-10)
-- `@pytest.mark.parametrize` on a `unittest.TestCase` method generates ONE test that ignores the parametrize data and calls the method with no args → TypeError. Always use a plain pytest class (no TestCase inheritance) for parametrized tests.
+Confidence == 0.7 is not reachable via normal `compute_mood` inputs (discrete levels
+noted in lessons below).
 
-### Test doubles must mirror the typed seam they stand in for (2026-06-12)
-- FakeTransport.on_receive lacked `callback: Callable[[bytes], None]` while Transport Protocol declared it; annotation-only fix caught in cycle-2 review. When adding a fake, copy the full signature (params + types + return) from the Protocol it implements.
+### Result
 
-## Week 2 Review-Fix Regression Wave Learnings (2026-06-12)
+**40/40 tests passed** (0.09 s).  All other tests untouched.
 
-**B1 — Baseline must learn raw tension, not mood-transformed intensity**
+### Durable lessons
 
-Added `test_regression_b1.py` with two classes:
-- `TestComputeMoodTensionField` (B1a): verifies `result.tension` equals the raw weighted score
-  (`pitch*0.4 + accel*0.3 + rot*0.3`), and that for a calm frame `result.tension ≠ result.intensity`
-  (calm: `intensity = 1 - tension`, so they're maximally different when tension ≈ 0).
-- `TestRunUsesRawTensionForBaseline` (B1b): the regression test that would have *caught* the bug —
-  injects a calm frame via `FakeSensorStream`, spies on `update_baseline` via `unittest.mock.patch`,
-  asserts the second argument equals `result.tension (0.0)` not `result.intensity (1.0)`.
-  Key insight: choose a calm frame because `intensity = 1 - tension` is maximally distinguishable.
+- **Reject tautologies:** any test that constructs the production dataclass and passes
+  the same field it then asserts is testing itself, not the production code.
+- **When exact boundary isn't reachable:** straddle from both sides + cross-check
+  `result.field == formula(result.inputs)` to catch future regressions that land on the boundary.
+- **compute_mood discrete confidence levels (2026-06-13):**
+  0.8, 0.56, 0.48, 0.336 (stressed/calm combos); 0.6, 0.42, 0.36, 0.252 (neutral combos).
 
-**B2 — run() is the SOLE pacer; SensorStream must not self-pace**
+---
 
-Added `test_regression_b2.py` with:
-- `TestSensorStreamNoPacing` (B2a): structural test via `inspect.getsource(SensorStream.__anext__)` —
-  asserts no `asyncio.sleep` or `time.sleep` in the source. Non-flaky, instant.
-- `TestRunPacingUnconditional` (B2b/B2c): behavioral — injects a spy `sleep` callable, feeds 5
-  gated frames and 5 both-fail frames separately, asserts `sleep` was called once per frame.
-  Design principle: `sleep` is injectable (no real wall-clock wait), count assertions are exact.
+### Cycle 2 Re-Review (2026-06-14)
 
-**B2 — Removed ~5.5s real-sleep overhead from existing timing tests**
+**Team decision:** All Cycle 1 findings (M5) verified ADDRESSED in Cycle 2 re-review (Correctness, Skeptic, Architect panels). Tautological test replaced with real boundary-straddling cases. Final: 265 tests passing.
 
-Refactored `run()` in `host/main.py` to accept `sleep: Callable[[float], Awaitable[None]] = asyncio.sleep`
-(backward-compatible default). Updated `test_confidence_gating.py` and `test_fallback.py` to pass
-`sleep=noop_sleep`. Suite went from **6.11s → 0.30s** (20× speedup).
+**Ready for ship-to-pr:** Push branch `synesthetic-familiar/week3-its-alive`, open PR, request Copilot review, then cloud-review-cycle, then squash-merge.
 
-**I1 — load_baseline fail-safe (hostile/corrupt inputs)**
-
-Added `TestLoadBaselineFailSafe` to `test_inference.py`: covers malformed JSON, bad types
-(`mean="EVIL"`, `stddev="EVIL"`), negative `sample_count`, missing keys, non-existent path, and a
-happy-path sanity case. Uses `tmp_path` — never touches the real `~/.vesper/baseline.json`.
-
-**ESCALATION — I1 gap: negative stddev not rejected by load_baseline**
-
-`inference.py` lines 78-85: the validation checks `math.isfinite(b.stddev)` but NOT `b.stddev >= 0.0`.
-A negative stddev is physically impossible and would corrupt Welford stats on the next update.
-`test_negative_stddev_returns_none` is marked `@pytest.mark.xfail(strict=True)` documenting the gap.
-**Juanita rejects; Librarian (inference.py owner) must fix.**
-
-**I2 — update_baseline hardened (non-finite tension, variance floor)**
-
-Added `TestUpdateBaselineHardened` to `test_inference.py`: NaN tension → baseline unchanged;
-+inf/-inf tension → unchanged; `NaN` with `None` baseline → zero-sample Baseline returned; variance
-floor prevents `math.sqrt(negative)` from corrupted prior.
-
-**I5 — _send_neutral_fallback uses quantise+jitter pipeline**
-
-Added `TestSendNeutralFallbackPipeline` to `test_main.py`: with seeded RNG, fallback packet's
-intensity byte equals `quantise_intensity(0.5) → 50 → apply_intensity_jitter(50, rng=seed)`,
-within ±5 of bucket 50. Proves no special-case wire path.
-
-**M6 — FakeTransport/FakeClock/FakeSensorStream deduplication**
-
-Extracted into `tests/helpers.py` as the single canonical source.
-`FakeSensorStream` re-exports `host.sensors.FakeSensorStream` (richer canonical version).
-`conftest.py` adds `tests/` to `sys.path` so `from helpers import ...` resolves in test files.
-Both `test_confidence_gating.py` and `test_fallback.py` now import from `helpers` — local class
-definitions removed. `noop_sleep` added to `helpers.py` as a no-op async sleep for injection.
-
-## Learnings
-- A docstring-only `async def` is valid Python but reads as a possibly-omitted body; add an explicit `pass` after the docstring for clarity (cycle-3 readability nit, 2026-06-12).
+**Phase-2 deferral:** Multi-threaded host test strategy (if adopted).

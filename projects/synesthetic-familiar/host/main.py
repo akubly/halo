@@ -4,6 +4,9 @@ Entry point for the Synesthetic Familiar host app.
 Week 2: Real sensor→inference→encode→send loop at 10Hz.
 Replaces Week-1 mock harness while preserving the Transport Protocol seam.
 
+Week 3: First-launch onboarding UX, calibration-state surfacing, fallback
+visibility, ATTENTION display, and mock-cycle harness for ATTENTION testing.
+
 Transport injection (Transport Protocol seam):
   --mock (or no --device)  →  MockTransport: logs packets, no hardware needed
   --device ADDR            →  BrilliantBleTransport: wraps brilliant-ble
@@ -15,7 +18,11 @@ Gate 2 helpers (MERGE-BLOCKING — must live here, not in inference or protocol)
   quantise_intensity(intensity: float) → int in {0, 25, 50, 75, 100}
   apply_intensity_jitter(quantised: int, rng=None) → int clamped 0–100
 
-Owner: Ng
+Week 3 onboarding helpers (testable — import directly from this module):
+  get_calibration_status(baseline) → str
+  run_mock_cycle(transport, *, cycles, sleep) → Coroutine
+
+Owner: Ng / Y.T. (Week 3 onboarding UX)
 """
 from __future__ import annotations
 
@@ -24,6 +31,7 @@ import asyncio
 import logging
 import random
 import time
+from pathlib import Path
 from typing import AsyncIterator, Awaitable, Callable, Protocol, runtime_checkable
 
 from host.familiar_protocol import (
@@ -38,12 +46,15 @@ from host.familiar_protocol import (
 )
 from host.sensors import FakeSensorStream, SensorFrame, SensorInitError, SensorStream
 from host.inference import (
+    Baseline,
     MoodResult,
     compute_mood,
+    get_activation_info,
     load_baseline,
     save_baseline,
     update_baseline,
 )
+from host.onboarding import is_first_launch, run_first_launch_flow, run_returning_flow
 
 
 logger = logging.getLogger("familiar.host")
@@ -64,6 +75,38 @@ CONFIDENCE_HOLD_TIMEOUT_S: float = 30.0
 BOTH_FAIL_TIMEOUT_S: float = 10.0
 
 _MOOD_NAME = {0: "NEUTRAL", 1: "CALM", 2: "STRESSED", 3: "ATTENTION"}
+
+# Sentinel — when passed as `baseline` kwarg to run(), means "load from disk".
+# Tests inject baseline=None directly to use population defaults without touching
+# ~/.vesper/baseline.json.
+_LOAD_BASELINE_FROM_DISK: object = object()
+
+# Default path used for first-launch sentinel detection — matches inference.py's
+# _BASELINE_PATH so both subsystems share the same marker file.
+_DEFAULT_BASELINE_PATH: Path = Path("~/.vesper/baseline.json").expanduser()
+
+# ---------------------------------------------------------------------------
+# Week 3 onboarding helpers (public, testable)
+# ---------------------------------------------------------------------------
+
+def get_calibration_status(baseline: Baseline | None) -> str:
+    """
+    Return human-readable calibration state for onboarding and status display.
+
+    "calibrating (n / 50 samples)" = population defaults active.
+    "personalized (n samples)"      = personal mean+1.5σ threshold active (ARD §5.4).
+
+    Driven by Librarian's get_activation_info() — pure function, no I/O.
+    Testable: inject a Baseline dataclass to drive any state.
+    Raw mean/stddev are NOT surfaced here — activation state + sample count only.
+    """
+    info = get_activation_info(baseline)
+    if info.state == "personalized":
+        return f"personalized ({info.sample_count} samples)"
+    return (
+        f"calibrating ({info.sample_count} / {info.samples_needed} samples — "
+        "population defaults active)"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -224,13 +267,16 @@ def apply_intensity_jitter(
 # Device message handler
 # ---------------------------------------------------------------------------
 
-def _make_device_msg_handler() -> Callable[[bytes], None]:
+def _make_device_msg_handler(reset_flag: list[bool] | None = None) -> Callable[[bytes], None]:
     def on_device_msg(data: bytes) -> None:
         msg = dispatch_device_message(data)
         if isinstance(msg, FamiliarAck):
             logger.info("← FAMILIAR_ACK  last_seq=%d", msg.last_received_seq)
         elif isinstance(msg, FamiliarReset):
             logger.info("← FAMILIAR_RESET  (device snapped to neutral on double-tap)")
+            print("[VESPER] Familiar reset — 'I'm fine' gesture acknowledged")
+            if reset_flag is not None:
+                reset_flag[0] = True  # Signal run loop to send NEUTRAL + seq.reset()
         elif msg is None:
             opcode = data[0] if data else 0
             if opcode in (OPCODE_FAMILIAR_ACK, OPCODE_FAMILIAR_RESET):
@@ -273,6 +319,9 @@ async def _send_update(
         conf_int,
         seq.current,
     )
+    # Surface ATTENTION prominently — it's a transient overlay, not a steady state.
+    if result.mood_int == Mood.ATTENTION:
+        print("⚡ [VESPER] ATTENTION — familiar is reacting to a notable moment")
 
 
 async def _send_neutral_fallback(
@@ -301,6 +350,27 @@ async def _send_neutral_fallback(
     )
 
 
+async def _send_neutral_reset(
+    transport: Transport,
+    seq: SequenceCounter,
+    rng: random.Random | None = None,
+) -> None:
+    """FAMILIAR_RESET reaction: send NEUTRAL to resync device state (JUANITA-T2-5 / ARD §5.2)."""
+    q_intensity = quantise_intensity(0.5)
+    j_intensity = apply_intensity_jitter(q_intensity, rng=rng)
+    packet = encode_familiar_update(
+        mood=Mood.NEUTRAL,
+        intensity=j_intensity,
+        confidence=50,
+        seq=seq.next(),
+    )
+    await transport.send(packet)
+    logger.info(
+        "→ FAMILIAR_UPDATE  mood=NEUTRAL (FAMILIAR_RESET reaction)  seq=%5d",
+        seq.current,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Main loop (Week 2 — replaces _mock_packet harness)
 # ---------------------------------------------------------------------------
@@ -311,6 +381,8 @@ async def run(
     *,
     clock: Callable[[], float] = time.monotonic,
     sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+    baseline: Baseline | None | object = _LOAD_BASELINE_FROM_DISK,
+    baseline_path: Path = _DEFAULT_BASELINE_PATH,
 ) -> None:
     """
     Real sensor→inference→encode→send loop at 10Hz.
@@ -330,6 +402,13 @@ async def run(
         sleep:         Async sleep callable; injectable for test determinism.
                        Drives the unconditional 10Hz pacer in the loop finally.
                        Defaults to asyncio.sleep.
+        baseline:      Pre-loaded Baseline (or None for population defaults).
+                       Default sentinel _LOAD_BASELINE_FROM_DISK loads from
+                       ~/.vesper/baseline.json at startup (production path).
+                       Tests pass baseline=None to bypass the real file.
+        baseline_path: Path used for sentinel-file first-launch detection.
+                       Default matches ~/.vesper/baseline.json (same file as
+                       inference.py uses).  Tests inject tmp_path/baseline.json.
     """
     seq = SequenceCounter()
 
@@ -339,10 +418,27 @@ async def run(
     # Both-sensors-fail fallback state
     both_fail_start: float | None = None
 
-    # Baseline — load once at startup; updated per successfully sent frame.
-    baseline = load_baseline()
+    # FAMILIAR_RESET flag — set by the receive callback, consumed each loop frame.
+    # A plain list[bool] is used so the closure in _make_device_msg_handler can
+    # mutate it without a nonlocal declaration (all asyncio, single-threaded).
+    _reset_flag: list[bool] = [False]
 
-    transport.on_receive(_make_device_msg_handler())
+    # Baseline — injectable seam (pass baseline=None for population defaults, e.g. in tests).
+    # _LOAD_BASELINE_FROM_DISK sentinel means "load from ~/.vesper/baseline.json" (production).
+    if baseline is _LOAD_BASELINE_FROM_DISK:
+        baseline = load_baseline(baseline_path)
+
+    # Week 3 — first-launch onboarding UX, driven by sentinel-file strategy (B1).
+    # Detection uses is_first_launch(baseline_path) — not the baseline-is-None proxy —
+    # so the banner never repeats even if the user quits before reaching high-confidence
+    # samples (the sentinel is written on first run, not after calibration completes).
+    if is_first_launch(baseline_path):
+        run_first_launch_flow(baseline_path)
+    else:
+        run_returning_flow(baseline)
+        print(f"\n[VESPER] Familiar online — {get_calibration_status(baseline)}\n")
+
+    transport.on_receive(_make_device_msg_handler(_reset_flag))
     await transport.connect()
     # I3: transport.disconnect() is guaranteed by the outer finally even if
     # sensor_stream.start() raises (SensorInitError, sounddevice missing, etc.).
@@ -354,12 +450,29 @@ async def run(
                 tick_start = clock()
                 pace_start = time.monotonic()
                 try:
+                    # FAMILIAR_RESET reaction (JUANITA-T2-5 / ARD §5.2 reconnect protocol):
+                    # Device double-tap already snapped device to NEUTRAL; host must agree.
+                    # seq.reset() re-syncs the sequence counter so the first post-reset
+                    # packet has seq=0x0000 (device resets last_accepted_seq to 0xFFFF).
+                    if _reset_flag[0]:
+                        _reset_flag[0] = False
+                        seq.reset()
+                        await _send_neutral_reset(transport, seq)
+                        last_send_time = tick_start
+                        both_fail_start = None
+                        continue  # finally (sleep pacer) still executes
+
                     # Both-sensors-fail fallback (10s → explicit NEUTRAL)
                     if not frame.mic_ok and not frame.imu_ok:
                         if both_fail_start is None:
                             both_fail_start = tick_start
                         elif (tick_start - both_fail_start) > BOTH_FAIL_TIMEOUT_S:
                             await _send_neutral_fallback(transport, seq)
+                            print(
+                                f"[VESPER] Sensor fallback active — both mic and IMU "
+                                f"unavailable for >{BOTH_FAIL_TIMEOUT_S:.0f}s; "
+                                f"familiar holding NEUTRAL"
+                            )
                             last_send_time = tick_start
                             both_fail_start = tick_start  # Re-arm
                         continue
@@ -381,6 +494,13 @@ async def run(
                         if (tick_start - last_send_time) > CONFIDENCE_HOLD_TIMEOUT_S:
                             # ~30s suppressed → force-send to prevent stuck creature.
                             await _send_update(transport, seq, result)
+                            print(
+                                f"[VESPER] Confidence hold released — "
+                                f"{CONFIDENCE_HOLD_TIMEOUT_S:.0f}s of suppressed updates; "
+                                f"familiar unstuck as "
+                                f"{_MOOD_NAME.get(result.mood_int, '?')} "
+                                f"(confidence={result.confidence:.2f})"
+                            )
                             last_send_time = tick_start
                         # Intentionally skip baseline update — we don't learn from
                         # low-confidence data.
@@ -408,19 +528,63 @@ async def run(
     finally:
         await sensor_stream.stop()
         if baseline is not None:
-            save_baseline(baseline)
+            save_baseline(baseline, baseline_path)
         await transport.disconnect()
 
 
 # ---------------------------------------------------------------------------
-# CLI entry point
+# Mock-cycle harness (Week 3 — ATTENTION path testing)
 # ---------------------------------------------------------------------------
+
+async def run_mock_cycle(
+    transport: Transport,
+    *,
+    cycles: int = 3,
+    delay_s: float = 1.0,
+    sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+) -> None:
+    """
+    Mock harness: cycle through all four mood states including ATTENTION.
+
+    Sends NEUTRAL → CALM → STRESSED → ATTENTION in sequence, repeating `cycles`
+    times.  Use with --mock-cycle to exercise the ATTENTION display path and
+    the full host-side pipeline without real sensors or BLE hardware.
+
+    Device-side peak detection is Ng's (Lua, frame.imu.raw threshold).
+    This harness provides the host-driven trigger needed for testing.
+
+    Testable: inject sleep=noop_sleep to run instantly; inject a FakeTransport
+    to capture packets.  Juanita: import and drive directly from acceptance tests:
+
+        from host.main import run_mock_cycle
+        asyncio.run(run_mock_cycle(FakeTransport(), cycles=1, sleep=noop_sleep))
+    """
+    seq = SequenceCounter()
+    _cycle_moods: list[MoodResult] = [
+        MoodResult(mood="neutral",   mood_int=Mood.NEUTRAL,   intensity=0.5, confidence=0.9, gated=False, tension=0.5),
+        MoodResult(mood="calm",      mood_int=Mood.CALM,      intensity=0.8, confidence=0.9, gated=False, tension=0.2),
+        MoodResult(mood="stressed",  mood_int=Mood.STRESSED,  intensity=0.9, confidence=0.9, gated=False, tension=0.8),
+        MoodResult(mood="attention", mood_int=Mood.ATTENTION, intensity=1.0, confidence=0.9, gated=False, tension=1.0),
+    ]
+    transport.on_receive(_make_device_msg_handler())
+    await transport.connect()
+    try:
+        for cycle_idx in range(cycles):
+            logger.info("[MockCycle] cycle %d/%d", cycle_idx + 1, cycles)
+            for result in _cycle_moods:
+                await _send_update(transport, seq, result)
+                await sleep(delay_s)
+    finally:
+        await transport.disconnect()
+
+
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
-            "Synesthetic Familiar — Week 2 real sensor loop.  "
-            "Sends sensor-derived FAMILIAR_UPDATE packets so the creature reacts."
+            "Synesthetic Familiar — host app.  "
+            "Week 2: real sensor loop.  Week 3: + onboarding UX, --mock-cycle harness."
         )
     )
     parser.add_argument(
@@ -440,17 +604,35 @@ def main() -> None:
         metavar="HZ",
         help="Mic sample rate in Hz (default: 16000).",
     )
+    parser.add_argument(
+        "--mock-cycle",
+        action="store_true",
+        help=(
+            "Run mock-cycle harness instead of real sensors: cycles through "
+            "NEUTRAL → CALM → STRESSED → ATTENTION to exercise the ATTENTION "
+            "display path.  Forces MockTransport.  Use to test without hardware."
+        ),
+    )
+    parser.add_argument(
+        "--mock-cycle-count",
+        type=int,
+        default=3,
+        metavar="N",
+        help="Number of complete mood cycles in --mock-cycle mode (default: 3).",
+    )
     args = parser.parse_args()
 
     transport: Transport
-    if args.mock or not args.device:
+    if args.mock or args.mock_cycle or not args.device:
         transport = MockTransport()
     else:
         transport = BrilliantBleTransport(args.device)
 
-    sensor_stream = SensorStream(sample_rate=args.sample_rate)
-
-    asyncio.run(run(transport, sensor_stream))
+    if args.mock_cycle:
+        asyncio.run(run_mock_cycle(transport, cycles=args.mock_cycle_count))
+    else:
+        sensor_stream = SensorStream(sample_rate=args.sample_rate)
+        asyncio.run(run(transport, sensor_stream))
 
 
 if __name__ == "__main__":

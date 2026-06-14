@@ -5,74 +5,36 @@
 > internal state — stress, calm, attention — inferred from mic + IMU.
 > No numbers, no metrics, no literal UI.
 
-**Project codename:** PULSE  
+**Project codename:** VESPER  
 **ARD:** `docs/projects/synesthetic-familiar/ARD.md`  
-**Status:** Week 1 scaffold — "It moves"
+**Status:** Week 3 "It's alive" complete — 265 tests green, shipped Week 3 implementation
 
 ---
 
-## Week 1 Goal
+## Week 3 Shipped
 
-Aaron sees the creature bobbing on Halo, driven by a mock `FAMILIAR_UPDATE`
-from the Python host harness. BLE wire format works end-to-end.
+Week 3 milestone "It's alive" complete (2026-06-13):
+- ✅ **IMU double-tap FAMILIAR_RESET** — device detects tap via `frame.imu.tap_callback()`, Lua debounce 350ms window, snaps to NEUTRAL on-device, sends opcode 0x01 to host
+- ✅ **ATTENTION overlay on IMU peak** — render-loop poll of `frame.imu.raw()` at 20fps, threshold `IMU_PEAK_THRESH_G = 1.8`, state [3] palette (white eye + gray body + 180ms +4px jump + 500ms overlay + restore-to-previous-mood)
+- ✅ **Baseline activation gate** — ACTIVATION_THRESHOLD = 50 Welford samples; population defaults <50, personal mean+1.5σ ≥50; `get_activation_info()` accessor
+- ✅ **Heap guard (static proxy, GAP-3 pending)** — `frame.system.get_heap_usage()` NOT available; placeholder proxy (~2% of budget via sprite rows + BLE buffer) is structurally wired but the 80% reduce / 95% halt thresholds are inert until a real firmware heap API ships; firmware-swap hook documented
+- ✅ **Host onboarding UX** — first-launch calibration status display, "learning your patterns" flow, ATTENTION trigger display
+- ✅ **Privacy audit** — abstract visuals, no labeled text, on-device inference only, no cloud egress
+- ✅ **265 tests green** — acceptance tests for double-tap reset, baseline activation, heap guard constants/structure (runtime thresholds inert until GAP-3), onboarding flow, graceful fallback
 
-Success bar: creature bobs on device, no jitter, no freeze.
-
----
-
-## File Map
-
-```
-projects/synesthetic-familiar/
-├── host/
-│   ├── main.py              # Entry point + BLE connection harness  [Ng]
-│   ├── sensors.py           # Mic capture (sounddevice) + IMU relay
-│   ├── inference.py         # Local mood heuristic (no cloud)
-│   ├── familiar_protocol.py # FAMILIAR_UPDATE/ACK/RESET wire encoding  [Ng]
-│   └── requirements.txt     # Python deps
-├── device/
-│   ├── main.lua             # On-device render loop  [Ng]
-│   └── sprites/             # 24×24 sprite assets (abstract-with-eyes)  [Da5id]
-└── tests/
-    ├── test_inference.py    # Unit tests for mood heuristic
-    └── test_protocol.py     # BLE message tests  [Juanita]
-```
-
----
-
-## Ownership
-
-| File | Owner | Notes |
-|------|-------|-------|
-| `host/main.py` | Ng | Mock-send harness + BLE loop |
-| `host/sensors.py` | — | Stub ready; fill in Week 2 |
-| `host/inference.py` | — | Stub ready; fill in Week 2 |
-| `host/familiar_protocol.py` | Ng | Full encode/decode implementation |
-| `device/main.lua` | Ng | Full render loop |
-| `device/sprites/` | Da5id | 24×24 abstract-with-eyes sprite assets |
-| `tests/test_inference.py` | — | Stub ready; fill in as inference lands |
-| `tests/test_protocol.py` | Juanita | Full BLE message test suite |
-
----
-
-## Running (Week 1)
-
-```bash
-cd projects/synesthetic-familiar/host
-pip install -r requirements.txt
-python main.py --device <HALO_BLE_ADDRESS>
-```
+See `.squad/decisions.md` (2026-06-12 & 2026-06-13) for detailed decision records.
 
 ---
 
 ## Architecture Summary
 
 - **Host (Python):** captures mic + IMU → computes mood heuristic → sends
-  `FAMILIAR_UPDATE` at 10Hz via BLE.
-- **Device (Lua):** receives updates → interpolates state (200–500ms) →
-  renders 24×24 abstract-with-eyes sprite at 15–30fps.
+  `FAMILIAR_UPDATE` at 10Hz via BLE; displays onboarding calibration status.
+- **Device (Lua):** receives updates → interpolates state (200–500ms) → 
+  renders 24×24 abstract-with-eyes sprite at 15–30fps; detects IMU taps for quick-reset and peak for attention overlay.
 - **Confidence gating:** host is the single authority. If confidence < 0.7,
   no update sent (silence > hallucination).
+- **Baseline learning:** Welford online mean + stddev, persisted in `~/.vesper/baseline.json`. Activates personal threshold at ≥50 samples.
 - **Privacy:** raw audio/IMU never leave host. Wire format carries only
   `mood_enum + intensity + confidence` — no PII.  The confidence byte
   is transmitted as a 0–100 integer so the device can surface signal
