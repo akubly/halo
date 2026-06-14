@@ -71,3 +71,29 @@
 **Ready for ship-to-pr:** Push branch `synesthetic-familiar/week3-its-alive`, open PR, request Copilot review, then cloud-review-cycle, then squash-merge.
 
 **Phase-2 deferral:** Heap host-visibility wire field (infrastructure).
+
+---
+
+## PR #4 Copilot Review — Docs Corrections (2026-06-14)
+
+**Triggered by:** Copilot PR review on `synesthetic-familiar/week3-its-alive` flagging stale/duplicate content in docs.
+
+### Changes applied
+
+| File | Issue | Fix |
+|------|-------|-----|
+| `projects/synesthetic-familiar/README.md` line 10 | "262 tests green" stale (Y.T. added 3 onboarding integration tests → 265) | Updated to **265** |
+| `projects/synesthetic-familiar/README.md` line 23 | Same "262 tests green" stale count | Updated to **265** |
+| `projects/synesthetic-familiar/README.md` lines 44–46 | Duplicate sentence "See ARD §4–§5.5…" back-to-back | Removed duplicate |
+| `docs/projects/synesthetic-familiar/ARD.md` line ~562 | "190+ tests green" in build-sequence table | Replaced with **"Full Week 3 automated suite green"** (non-numeric) |
+| `docs/projects/synesthetic-familiar/TEST-STRATEGY.md` line ~1361 | "190+ tests green" in milestone success criteria | Replaced with **"comprehensive Week 3 automated test coverage green"** (non-numeric) |
+
+### ⚠️ Durable lesson: do NOT hard-code test counts in spec docs
+
+**README status/badge lines** — exact count is useful; update it when it changes.
+
+**ARD build-sequence tables and TEST-STRATEGY success criteria** — these are durable spec artifacts. A running test count goes stale every sprint and triggers another doc PR. Use intent-based language ("full suite green", "comprehensive coverage green") that survives incremental test additions without doc churn.
+
+**Rule of thumb:** If the number will change every time a developer adds a test, it does not belong in a spec doc. It belongs in CI output or a README badge.
+
+**Decision record:** `.squad/decisions/inbox/librarian-pr4-copilot-fixes.md`

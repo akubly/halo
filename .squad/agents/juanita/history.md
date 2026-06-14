@@ -106,3 +106,45 @@ noted in lessons below).
 **Ready for ship-to-pr:** Push branch `synesthetic-familiar/week3-its-alive`, open PR, request Copilot review, then cloud-review-cycle, then squash-merge.
 
 **Phase-2 deferral:** Multi-threaded host test strategy (if adopted).
+
+---
+
+## 2026-06-14 — PR #4 Copilot Review Fixes
+
+**Branch:** `synesthetic-familiar/week3-its-alive`  
+**Files touched:** `tests/test_week3_threshold_tuning.py`, `tests/test_week3_fallback_depth.py`
+
+### Fix 1 — Removed unused `import math` (threshold_tuning.py)
+
+`import math` was left behind after the tautological `MoodResult` test was replaced
+with real `compute_mood` boundary calls (see Cycle 1 above). The replacement used no
+`math.*` calls, making the import dead. Confirmed with ripgrep — zero `math.` references
+in the file.
+
+**Durable lesson:** After a substantial test rewrite, scan remaining imports; the old
+test scaffold often leaves behind helpers that the new implementation doesn't need.
+
+### Fix 2 — Clarified off-by-one docstring wording (fallback_depth.py)
+
+`test_reset_during_both_fail_sends_neutral_once` had a misleading summary line:
+`"FAMILIAR_RESET fires after frame 3."` — ambiguous between 1-indexed "the 3rd frame"
+and 0-indexed "frame index 3" (which would be the 4th frame).
+
+`_ResetCallbackStream(reset_at=3)` fires the callback when `self._idx == 3` after
+incrementing — meaning it fires after yielding frame **index 2**. The FakeClock timing
+block and the inline comment already said this correctly; only the summary line was wrong.
+
+Fixed to: `"FAMILIAR_RESET fires after frame index 2 (0-indexed)."`
+
+**Durable lesson:** When a docstring has a summary line *and* a step-by-step timing
+section, both must use the same indexing convention explicitly. If one uses 0-indexed
+and the other uses English ordinals ("after frame 3"), the reader can't tell which is
+authoritative without reading the implementation.
+
+**Durable lesson:** `_ResetCallbackStream(reset_at=N)` fires after yielding frame
+index **N-1** (because `_idx` is incremented before the check `_idx == reset_at`).
+Document this as frame index N-1, not N.
+
+### Result
+
+**265/265 passed** (0.40 s). No behavior change.

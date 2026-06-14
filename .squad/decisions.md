@@ -3196,3 +3196,211 @@ Two-cycle persona review and fix wave for Week 3 "It's Alive" milestone. **Cycle
 **Final Test:** 265 passed (0.39s)  
 **Decision:** Ready for ship-to-pr. Push branch, open PR, request Copilot code review, then cloud-review-cycle, then squash-merge to main.
 
+---
+
+## 2026-06-14: Week 3 PR #4 Cloud Review Cycle — 3 Cycles, 12 Copilot Comments All Addressed, Squash-Merged
+
+**Status:** SHIPPED (merged as e63de17)  
+**Date:** 2026-06-14  
+**Merger:** Copilot PR review (copilot-pull-request-reviewer[bot])  
+**Merge SHA:** e63de17  
+**Branch:** synesthetic-familiar/week3-its-alive (squash-deleted after merge)
+
+### Summary
+
+Week 3 PR #4 underwent 3 cloud-review cycles via Copilot's automated review. All 12 Copilot comments across cycles 1–3 were addressed and verified. Real bug discovered and fixed: `baseline_path` parameter missing from `load_baseline()` and `save_baseline()` calls in host/main.py, causing injected path desyncing between sentinel detection and disk I/O. All test infrastructure changes minimal; 265 tests green throughout.
+
+### Cycle Breakdown
+
+**Cycle 1 (10 Copilot threads, all addressed):**
+- **Y.T. (host/main.py):** Threaded baseline_path through load_baseline()/save_baseline() calls (~lines 429, 531). Root cause: sentinel-file detection used injected path but disk reads/writes used hardcoded default, leaving injected files empty and mismatching baseline state on next run. Removed unused `import sys` (line 33). Commit 139c370.
+- **Librarian (docs):** Updated hard-coded test count 262→265 in README (lines 10, 23). De-numericized ARD (line ~562) and TEST-STRATEGY (line ~1361) success criteria to "Full Week 3 automated suite green" / "comprehensive Week 3 test coverage" (durable spec docs must survive incremental test additions). Removed duplicate sentence in README (lines 44–46). Commit 139c370.
+- **Juanita (tests):** Removed unused `import math` from test_week3_threshold_tuning.py (line 16). Clarified off-by-one wording in test_week3_fallback_depth.py docstring (line 351, changed "after frame 3" → "after frame index 2 (0-indexed)"). Commit 139c370.
+
+**Cycle 2 (2 Copilot threads, all addressed):**
+- **Librarian:** Reworded README line 20 "Heap monitoring (fallback)" → "Heap guard (static proxy, GAP-3 pending)" to clarify proxy covers ~2% budget and 80%/95% thresholds inert until `frame.system.get_heap_usage()` (GAP-3) ships. Updated line 23 test-coverage bullet "heap thresholds" → "heap guard constants/structure (runtime thresholds inert until GAP-3)". Commit 08efca7.
+- **Y.T.:** Corrected `.squad/agents/yt/history.md` codename record: VESPER current, PULSE earlier candidate. Commit 08efca7.
+
+**Cycle 3:**
+- No unresolved threads. Status clean. Squash-merged as e63de17.
+
+### Durable Lessons Captured
+
+1. **Hard-code test counts in durable spec docs = churn liability** (Librarian finding). Solution: intent-based language ("comprehensive Week 3 coverage") in ARD/TEST-STRATEGY; exact counts (265) in README status/badges only. De-numericized success criteria survive incremental test additions without doc PRs.
+
+2. **Injectable path parameters must thread through *all* I/O call sites** (Y.T. finding). Sentinel-file detection and disk read/write both affected when baseline_path is injectable for testing. Single-function audit required when adding seams.
+
+3. **Cloud review via Copilot PR review works as advertised** (team confirmation). 12 comments across 3 cycles, all actionable (no spam), all addressed, then clean merge. Copilot-pull-request-reviewer[bot] is the live config that enables this; documented for future PR cycles.
+
+### Test & Merge Status
+
+- **Final test count:** 265 passed, 0 failed (unchanged from pre-merge; all cycles maintained green)
+- **Merge:** Squash-merged as e63de17 to main
+- **Branch:** synesthetic-familiar/week3-its-alive deleted by GitHub after merge
+- **Local state:** main reset to origin/main (e63de17), clean worktree
+
+---
+
+# Fix Records — Week 3 PR #4 Copilot Review (Inbox Merge, 2026-06-14)
+
+## Y.T. — PR #4 Copilot Review — host/main.py Baseline-Path Threading
+
+**Date:** 2026-06-14  
+**Branch:** synesthetic-familiar/week3-its-alive  
+**Author:** Y.T. (host app owner)  
+**Requested by:** Aaron Kubly
+
+### Summary
+
+Three bugs flagged by Copilot in `projects/synesthetic-familiar/host/main.py`, all fixed.
+No changes to inference.py, tests, or docs (owned by other agents).
+
+### Fix 1 — load_baseline() missing baseline_path (~line 430)
+
+**Root cause:** When `baseline is _LOAD_BASELINE_FROM_DISK`, `load_baseline()` was called
+without the injectable `baseline_path` argument. Callers injecting a non-default `baseline_path`
+for sentinel-file detection (e.g. tests using `tmp_path/baseline.json`) would get sentinel
+detection from their injected path but disk reads from the hardcoded `~/.vesper/baseline.json`
+— mismatched state.
+
+**Fix:** `load_baseline()` → `load_baseline(baseline_path)`
+
+**Production safety:** `baseline_path` defaults to `_DEFAULT_BASELINE_PATH` which equals
+`inference._BASELINE_PATH`, so production behavior is unchanged.
+
+### Fix 2 — save_baseline() missing baseline_path (~line 532)
+
+**Root cause:** Same root cause as Fix 1 in the shutdown path. `save_baseline(baseline)` would
+always write the default file even when an injected `baseline_path` was active, leaving the
+injected-path file empty and breaking sentinel/baseline consistency on the next run.
+
+**Fix:** `save_baseline(baseline)` → `save_baseline(baseline, baseline_path)`
+
+### Fix 3 — Unused `import sys` (line 34)
+
+**Root cause:** `sys` was imported but never referenced in `main.py`, likely a leftover from
+`print_onboarding` removal. Confirmed with `rg 'sys\.'` — zero matches.
+
+**Fix:** Removed the import line.
+
+### Test Results
+
+```
+265 passed in 2.12s
+```
+
+All 265 tests green. The `baseline_path` threading did not break any existing tests, confirming
+no test was asserting the previously-buggy behavior.
+
+---
+
+## Librarian — PR #4 Copilot Review Corrections
+
+**Date:** 2026-06-14  
+**Branch:** synesthetic-familiar/week3-its-alive  
+**Filed by:** Librarian (AI/ML Specialist, docs-accuracy owner)  
+**Requested by:** Aaron Kubly
+
+### Summary
+
+Five issues flagged by Copilot's PR #4 review have been resolved in docs. No host code or tests were modified (parallel work ongoing).
+
+### Changes Applied
+
+#### `projects/synesthetic-familiar/README.md`
+
+| # | Location | Issue | Fix |
+|---|----------|-------|-----|
+| 1 | Line 10 (Status line) | Hard-coded "262 tests green" — stale after Y.T. added 3 onboarding integration tests | Updated to **265 tests green** |
+| 2 | Line 23 (bullet) | Same "262 tests green" hard-code | Updated to **265 tests green** |
+| 3 | Lines 44–46 | Duplicate sentence "See ARD §4–§5.5…" appeared twice back-to-back | Removed the accidental duplicate |
+
+#### `docs/projects/synesthetic-familiar/ARD.md`
+
+| # | Location | Issue | Fix |
+|---|----------|-------|-----|
+| 4 | Line ~562 (build-sequence table) | "190+ tests green" — conflicts with 265; brittle running count in a durable spec doc | Replaced with **"Full Week 3 automated suite green"** (non-numeric) |
+
+#### `docs/projects/synesthetic-familiar/TEST-STRATEGY.md`
+
+| # | Location | Issue | Fix |
+|---|----------|-------|-----|
+| 5 | Line ~1361 (milestone success criteria) | "190+ tests green" — same brittleness in durable spec | Replaced with **"comprehensive Week 3 automated test coverage green"** (non-numeric) |
+
+### Rationale for Non-Numeric in ARD / TEST-STRATEGY
+
+Copilot's own guidance: either update to the accurate count or make non-numeric to avoid future drift. README status/badge-style lines carry the exact count (265) because a precise count is useful there. ARD and TEST-STRATEGY are durable spec docs whose success criteria should survive incremental test additions without requiring a doc PR every sprint — so they use intent-based language instead.
+
+### Verification
+
+Post-edit grep confirmed:
+- No "262" in any of the three owned files
+- No "190+" in any of the three owned files  
+- Duplicate sentence in README fully removed
+
+### Cycle-2 Copilot Review — Heap Accuracy Fix (2026-06-14)
+
+**Cycle-2 addition:** README line 20 renamed "Heap monitoring (fallback)" → **"Heap guard (static proxy, GAP-3 pending)"** and reworded to make explicit that the proxy covers ~2% of budget and the 80%/95% thresholds are inert until `frame.system.get_heap_usage()` (GAP-3) ships. README line 23 test-coverage bullet changed "heap thresholds" → **"heap guard constants/structure (runtime thresholds inert until GAP-3)"** to avoid implying runtime threshold coverage that does not yet exist.
+
+---
+
+## Juanita — PR #4 Copilot Review — Test Files
+
+**Date:** 2026-06-14  
+**Branch:** synesthetic-familiar/week3-its-alive  
+**Author:** Juanita (QA/test owner)  
+**Requested by:** Aaron Kubly
+
+### Summary
+
+Two issues flagged by Copilot in Juanita-owned test files, both fixed.
+No changes to host code, inference, docs, or any other agent's files.
+
+### Fix 1 — Remove unused `import math` (test_week3_threshold_tuning.py line 16)
+
+**Root cause:** `import math` was present but never referenced. Verified with
+`rg 'math\.'` across the file — zero matches. The import was likely left behind
+when the original tautological MoodResult test was replaced with real
+`compute_mood` boundary calls (which do not require math constants).
+
+**Fix:** Removed the `import math` line (line 16). `import unittest` is now the
+first import after `from __future__ import annotations`.
+
+**Behavioral impact:** None — unused import only.
+
+### Fix 2 — Off-by-one wording in docstring (test_week3_fallback_depth.py line 351)
+
+**Root cause:** The test method `test_reset_during_both_fail_sends_neutral_once`
+had an ambiguous docstring first line:
+
+> "8 both-fail frames; FAMILIAR_RESET fires after frame 3."
+
+`_ResetCallbackStream` with `reset_at=3` fires the callback when
+`self._idx == reset_at` *after* the per-iteration increment — i.e., after
+yielding frame **index 2** (the 3rd frame in 1-indexed terms). The existing
+FakeClock timing block ("Frame 2: yields frame, then RESET fires") and the
+inline comment (`# fires after yielding frame 2 (0-indexed)`) both described
+this correctly. Only the summary line was wrong/ambiguous.
+
+**Fix:** Changed:
+```
+8 both-fail frames; FAMILIAR_RESET fires after frame 3.
+```
+to:
+```
+8 both-fail frames; FAMILIAR_RESET fires after frame index 2 (0-indexed).
+```
+
+This is now internally consistent with the FakeClock timing section, the inline
+`reset_at=3` comment, and `_ResetCallbackStream`'s class docstring semantics.
+
+**Behavioral impact:** None — docstring only, no assertions changed.
+
+### Test Results
+
+```
+265 passed in 0.40s
+```
+
+All 265 tests green. No behavior change confirmed.
+
