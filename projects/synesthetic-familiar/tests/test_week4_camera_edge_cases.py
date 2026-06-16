@@ -150,39 +150,37 @@ class TestModelSyncHashMismatch:
 
     def test_hash_mismatch_does_not_modify_global_state(self) -> None:
         """
-        MODEL-I5: When hash verification fails, no global weight state may be
-        modified.  The local/default weights must remain unchanged.
+        MODEL-I5: When hash verification fails, the caller's current weights
+        must be returned unchanged (fail-closed guarantee).
+
+        The API is pure-functional: sync_population_weights takes current weights
+        and returns new weights.  On hash mismatch it must return the same weights
+        that were passed in — demonstrating state isolation without any getter.
         """
-        original_weights = b'{"weights": {"pitch_var": 0.4}}'
-        tampered_weights = b'{"weights": {"pitch_var": 0.99}}'
-        correct_hash = _sha256(original_weights)  # pass correct hash, serve wrong content
+        from host.inference import VisualWeights
+        from host.model_sync import PopulationManifest, sync_population_weights
 
-        # Read current weights before attempted bad download
-        initial_weights = getattr(_model_sync, "get_current_weights", None)
-        if initial_weights is None:
-            pytest.skip(
-                "model_sync has no get_current_weights() — can't verify state isolation. "
-                "Add get_current_weights() to model_sync.py and re-run."
-            )
-        before = initial_weights()
+        # A sentinel "current" weights value distinct from factory defaults.
+        current = VisualWeights(visual_activity=0.12, visual_brightness=0.04)
 
-        def _mock_urlopen(req, *args, **kwargs):
-            return _make_mock_response(tampered_weights)
+        # Manifest whose sha256 will NOT match the content we serve.
+        manifest = PopulationManifest(
+            url="https://example.com/model.json",
+            sha256="a" * 64,  # 64 hex chars; guaranteed mismatch
+        )
 
-        with patch("urllib.request.urlopen", side_effect=_mock_urlopen):
-            try:
-                _model_sync.download_weights(  # type: ignore[attr-defined]
-                    url="https://example.com/model.json",
-                    expected_hash=correct_hash,
-                )
-            except Exception:
-                pass  # expected rejection
+        fake_content = b'{"version": "1", "visual_activity": 0.15, "visual_brightness": 0.05}'
+        mock_response = _make_mock_response(fake_content)
+        mock_opener = MagicMock()
+        mock_opener.open.return_value = mock_response
 
-        after = initial_weights()
-        assert before == after, (
-            f"MODEL-I5 VIOLATION: Hash mismatch modified global weights state. "
-            f"before={before!r}, after={after!r}. "
-            "Failed hash verification must be a no-op for weight state."
+        with patch("urllib.request.build_opener", return_value=mock_opener):
+            result = sync_population_weights(manifest, current)
+
+        assert result == current, (
+            f"MODEL-I5 VIOLATION: sync_population_weights changed weights on hash mismatch. "
+            f"Expected returned weights == passed-in current={current!r}, got {result!r}. "
+            "Fail-closed: hash mismatch must return current weights unchanged."
         )
 
 
@@ -445,7 +443,12 @@ class TestOnlineWeightBounds:
         """
         No individual weight may exceed 2× the population default value.
 
-        Simulates applying an extreme online update and verifies clamping.
+        Simulates applying an extreme online update (10× default) using the real
+        visual keys (visual_activity, visual_brightness) and verifies clamping.
+
+        Guard: asserts at least one expected key is present in the result before
+        checking the bound, so this test can never pass vacuously if the API
+        changes or unknown keys are silently ignored.
         """
         apply_fn = (
             getattr(_model_sync, "apply_weight_update", None)
@@ -457,11 +460,13 @@ class TestOnlineWeightBounds:
                 "Add weight-update function and update this test."
             )
 
-        # Try to drive a weight to 10× its default (should be clamped to ≤ 2×)
+        from host.inference import DEFAULT_VISUAL_WEIGHTS, MAX_VISUAL_WEIGHT_MULTIPLIER
+
+        # Try to drive visual weights to 10× their defaults (should be clamped to ≤ 2×)
+        # visual_activity default=0.15 → extreme=1.5; visual_brightness default=0.05 → extreme=0.5
         extreme_update = {
-            "pitch_var": 4.0,    # 10× default of 0.4
-            "imu_accel": 3.0,    # 10× default of 0.3
-            "imu_rot": 3.0,      # 10× default of 0.3
+            "visual_activity":   DEFAULT_VISUAL_WEIGHTS.visual_activity * 10,
+            "visual_brightness": DEFAULT_VISUAL_WEIGHTS.visual_brightness * 10,
         }
         try:
             result = apply_fn(extreme_update)
@@ -474,23 +479,37 @@ class TestOnlineWeightBounds:
         if result is None:
             pytest.skip("apply_weight_update returned None — check return contract.")
 
-        population_defaults = {"pitch_var": 0.4, "imu_accel": 0.3, "imu_rot": 0.3}
-        for key, default in population_defaults.items():
-            if key in result:
-                cap = 2.0 * default
-                assert result[key] <= cap + 1e-9, (
-                    f"§6.1 VIOLATION: Weight '{key}' = {result[key]:.4f} exceeds "
-                    f"2× population default ({cap:.4f}). "
-                    "Online learning must clamp weights to ≤ 2× default to prevent "
-                    "runaway adaptation."
-                )
+        # Guard: at least one expected visual key must be present in the result.
+        # apply_weight_update silently ignores unknown keys, so if the visual keys
+        # are missing the bound assertion would never fire (vacuous pass).
+        visual_defaults = {
+            "visual_activity":   DEFAULT_VISUAL_WEIGHTS.visual_activity,
+            "visual_brightness": DEFAULT_VISUAL_WEIGHTS.visual_brightness,
+        }
+        present_keys = visual_defaults.keys() & result.keys()
+        assert present_keys, (
+            f"apply_weight_update result contains none of the expected visual keys "
+            f"{set(visual_defaults)}. Got keys: {set(result.keys())}. "
+            "Cannot verify bounds — check apply_weight_update return contract."
+        )
+
+        for key in present_keys:
+            default = visual_defaults[key]
+            cap = default * MAX_VISUAL_WEIGHT_MULTIPLIER
+            assert result[key] <= cap + 1e-9, (
+                f"§6.1 VIOLATION: Weight '{key}' = {result[key]:.4f} exceeds "
+                f"2× population default ({cap:.4f}). "
+                "Online learning must clamp weights to ≤ 2× default to prevent "
+                "runaway adaptation."
+            )
 
     def test_weights_can_be_reset_to_defaults(self) -> None:
         """
         §6.1: "Reset-to-defaults gesture or config."
 
-        There must be a way to reset weights to population defaults — e.g., for
-        a corrupted/diverged weight set.
+        reset_weights_to_defaults() must return factory-default VisualWeights,
+        enabling recovery from a corrupted/diverged weight set.
+        The API is pure-functional — we assert on the return value directly.
         """
         reset_fn = (
             getattr(_model_sync, "reset_weights_to_defaults", None)
@@ -510,20 +529,33 @@ class TestOnlineWeightBounds:
                 "Weight reset must not raise."
             )
 
-        # After reset, weights should be at population defaults
-        get_fn = getattr(_model_sync, "get_current_weights", None)
-        if get_fn is None:
-            return  # Can't verify without a getter
+        assert result is not None, "reset_weights_to_defaults must return a value."
 
-        weights = get_fn()
-        population_defaults = {"pitch_var": 0.4, "imu_accel": 0.3, "imu_rot": 0.3}
-        for key, expected in population_defaults.items():
-            if key in weights:
-                assert math.isclose(weights[key], expected, rel_tol=1e-6), (
-                    f"After reset, weight '{key}' should be {expected}; "
-                    f"got {weights[key]}. "
-                    "reset_weights_to_defaults must restore population defaults."
-                )
+        import dataclasses
+        from host.inference import DEFAULT_VISUAL_WEIGHTS
+
+        # Normalise to dict for comparison (accepts VisualWeights or plain dict).
+        if dataclasses.is_dataclass(result):
+            result_dict = dataclasses.asdict(result)
+        elif isinstance(result, dict):
+            result_dict = result
+        else:
+            pytest.fail(
+                f"reset_weights_to_defaults returned unexpected type "
+                f"{type(result).__name__}. Expected VisualWeights or dict."
+            )
+            return  # unreachable, satisfies type-checker
+
+        default_dict = dataclasses.asdict(DEFAULT_VISUAL_WEIGHTS)
+        for key, expected in default_dict.items():
+            assert key in result_dict, (
+                f"reset result is missing key '{key}'. Expected keys: {set(default_dict)}."
+            )
+            assert math.isclose(result_dict[key], expected, rel_tol=1e-6), (
+                f"After reset, weight '{key}' should be {expected}; "
+                f"got {result_dict[key]}. "
+                "reset_weights_to_defaults must restore population defaults."
+            )
 
 
 # ═════════════════════════════════════════════════════════════════════════════

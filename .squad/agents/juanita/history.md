@@ -204,4 +204,87 @@ The core Week-4 gate is the **additive invariant**: camera_ok=False must produce
 
 ---
 
+## 2026-06-14 — Week-4 Persona-Review Fix (Raven conditions)
+
+**Branch:** `synesthetic-familiar/week4-it-sees`
+
+### Fixes delivered
+
+**B1 — Vacuous pass via unknown keys (test_weight_cannot_exceed_two_times_default)**
+
+The original test used Phase-1 IMU keys (`pitch_var`, `imu_accel`, `imu_rot`) in the
+`apply_weight_update` call.  The pure-functional API silently ignores unknown keys — it
+only processes `visual_activity` and `visual_brightness`.  This meant the extreme-value
+update was a no-op, the result dict contained only visual keys at their EMA-blended
+defaults, and the `for key in population_defaults` loop never executed a single assertion.
+The test passed vacuously every run.
+
+**Fix pattern:** (1) Use the *actual* keys the function accepts (`visual_activity`,
+`visual_brightness` with 10× default values).  (2) Add a **presence guard** before any
+bounds assertion: `assert present_keys` ensures the result contains at least one expected
+visual key.  If the function ever drops visual keys from its output, the guard fails
+loudly instead of silently skipping the assertion.
+
+> **Lesson (HIGH confidence):** When testing a function that silently ignores unknown keys,
+> always assert that at least one expected key is present in the result *before* asserting
+> the value.  Without the guard, an update dict built from wrong-namespace keys will pass
+> every bounds check vacuously.
+
+**API-REF fixes — removed `get_current_weights` references**
+
+`get_current_weights` was removed as part of making `model_sync` pure-functional.  Two
+tests referenced it:
+
+- `test_hash_mismatch_does_not_modify_global_state`: Rewrote to call
+  `sync_population_weights(manifest, current)` with a mismatched hash and assert the
+  return value equals the passed-in `current`.  No getter needed — the contract is
+  directly expressed by the return value.
+- `test_weights_can_be_reset_to_defaults`: Rewrote to assert on the return value of
+  `reset_weights_to_defaults()` directly against `DEFAULT_VISUAL_WEIGHTS`.  The
+  `get_current_weights` check at the end was dead code (would have skipped) — now
+  replaced with a real assertion.
+
+**build_opener patching (test_download_request_contains_no_user_id, test_correct_hash_accepts_weights)**
+
+`_download_bytes` was updated by Librarian to use `urllib.request.build_opener(...).open(...)`
+instead of `urllib.request.urlopen`.  Tests that patched `urlopen` stopped intercepting
+the real code path — `captured_requests` was always empty, causing `assert captured_requests`
+to fail.
+
+**Fix:** Patch `urllib.request.build_opener` to return a `MagicMock` opener.
+The mock opener's `.open(req, timeout=...)` captures the `Request` object for inspection
+(privacy test) or returns a fake response (acceptance test).  The `_HTTPSOnlyRedirectHandler`
+passed to `build_opener` is consumed by the call but our mock returns immediately —
+sufficient because we are testing `download_weights` behaviour, not the redirect handler
+itself.
+
+> **Lesson (HIGH confidence):** When patching urllib internals, patch at the boundary the
+> *production code* actually calls.  If the production code calls `build_opener().open()`,
+> patch `urllib.request.build_opener`; if it calls `urlopen`, patch `urlopen`.  Patching
+> the wrong seam leaves the real code path untouched and produces vacuous passes
+> (network errors caught silently) or outright failures (expected mocks never fire).
+
+**New negative-scheme tests (M3 + I2 coverage)**
+
+Added `TestModelI5_NegativeSchemeDownload` — plain pytest class (not TestCase, so
+`parametrize` works) with four parametrized cases covering `file://`, `ftp://`, `data:`,
+and empty-string URLs.  Each case asserts `ValueError` is raised before any network I/O.
+Also added `test_redirect_downgrade_to_http_raises_value_error` which mocks the opener to
+raise the `ValueError` that `_HTTPSOnlyRedirectHandler` would emit, verifying that
+`download_weights` propagates it.
+
+### Result
+
+**304 passed, 19 skipped, 0 failed.**  All model_sync/bounds/privacy tests active and
+passing.  Skips are exclusively Ng's deferred `_CameraRelay` tests.
+
+### Learnings
+
+- **Vacuous pass via unknown key dict:** `apply_weight_update` silently ignores keys not in `{visual_activity, visual_brightness}`.  Using wrong-namespace keys in an extreme-update dict produces a no-op; the bounds assertion loop runs zero iterations.  Always assert key presence before asserting values.
+- **build_opener patching:** After Librarian changed `_download_bytes` to `build_opener().open()`, any `urlopen` patch is a no-op.  Patch the function the production code actually invokes (`urllib.request.build_opener`) and configure its return value's `.open()` method.
+- **Negative-scheme coverage:** `file://`, `ftp://`, `data:`, and `""` URLs all trigger the scheme check in `_download_bytes` before any network connection.  No mock needed for these cases — the `ValueError` fires synchronously.
+- **Pure-functional state-isolation test:** For pure-functional APIs with no global state, prove fail-closed behaviour by passing a sentinel `current` and asserting `result == current` — no getter required.
+
+---
+
 📌 Team update (2026-06-15T05:37:29Z): Week-4 camera SDK gate resolved BLOCKED (CAMERA-I3); Librarian shipped Option-C cloud sync; Juanita delivered 53 new tests (296 passed, 22 skipped); Raven approved with 6 merge-blocking conditions. Phase-2 shipping cloud-refinement; camera deferred Phase-3 — decided by Ng, Librarian, Juanita, Raven

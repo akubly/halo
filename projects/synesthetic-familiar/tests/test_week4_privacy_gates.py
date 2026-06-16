@@ -433,18 +433,17 @@ class TestModelI5_ModelSyncPrivacy:
         MODEL-I5: The HTTP GET request to the model server must contain no
         user_id, device_id, or user-identifying query parameter.
 
-        Uses unittest.mock to intercept the urllib.request.urlopen call and
-        inspect the Request object — no real network traffic.
+        Patches urllib.request.build_opener so the Request object passed to
+        opener.open() can be inspected — no real network traffic.
         """
         from unittest.mock import patch, MagicMock
-        import io
 
         fake_weights = b'{"weights": {"pitch_var": 0.4, "imu_accel": 0.3, "imu_rot": 0.3}}'
         fake_hash = __import__("hashlib").sha256(fake_weights).hexdigest()
 
         captured_requests: list = []
 
-        def _mock_urlopen(req, *args, **kwargs):
+        def _mock_open(req, timeout=None):
             captured_requests.append(req)
             response = MagicMock()
             response.read.return_value = fake_weights
@@ -452,7 +451,10 @@ class TestModelI5_ModelSyncPrivacy:
             response.__exit__ = MagicMock(return_value=False)
             return response
 
-        with patch("urllib.request.urlopen", side_effect=_mock_urlopen):
+        mock_opener = MagicMock()
+        mock_opener.open.side_effect = _mock_open
+
+        with patch("urllib.request.build_opener", return_value=mock_opener):
             try:
                 _model_sync.download_weights(  # type: ignore[attr-defined]
                     url="https://example.com/model.json",
@@ -572,20 +574,24 @@ class TestModelI5_ModelSyncPrivacy:
     def test_correct_hash_accepts_weights(self) -> None:
         """
         MODEL-I5: Correct hash → weights must be accepted and returned.
+
+        Patches urllib.request.build_opener so the opener.open() call returns
+        fake weights without touching the network.
         """
         from unittest.mock import patch, MagicMock
 
         fake_weights = b'{"weights": {"pitch_var": 0.4, "imu_accel": 0.3}}'
         correct_hash = __import__("hashlib").sha256(fake_weights).hexdigest()
 
-        def _mock_urlopen(req, *args, **kwargs):
-            response = MagicMock()
-            response.read.return_value = fake_weights
-            response.__enter__ = lambda s: s
-            response.__exit__ = MagicMock(return_value=False)
-            return response
+        mock_response = MagicMock()
+        mock_response.read.return_value = fake_weights
+        mock_response.__enter__ = lambda s: s
+        mock_response.__exit__ = MagicMock(return_value=False)
 
-        with patch("urllib.request.urlopen", side_effect=_mock_urlopen):
+        mock_opener = MagicMock()
+        mock_opener.open.return_value = mock_response
+
+        with patch("urllib.request.build_opener", return_value=mock_opener):
             try:
                 result = _model_sync.download_weights(  # type: ignore[attr-defined]
                     url="https://example.com/model.json",
@@ -599,3 +605,70 @@ class TestModelI5_ModelSyncPrivacy:
         assert result is not None, (
             "download_weights must return the weights (not None) when hash matches."
         )
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# MODEL-I5 — Negative-scheme rejection (M3 + I2 coverage)
+# ═════════════════════════════════════════════════════════════════════════════
+
+class TestModelI5_NegativeSchemeDownload:
+    """
+    MODEL-I5: download_weights must reject any non-HTTPS URL with ValueError
+    before making a network connection.
+
+    Plain pytest class (no TestCase) — required for pytest.mark.parametrize.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _skip_if_no_model_sync(self) -> None:
+        if not _MODEL_SYNC_AVAILABLE:
+            pytest.skip(
+                "host.model_sync not yet created — pending Librarian. "
+                "Tests activate automatically once model_sync.py is implemented."
+            )
+
+    @pytest.mark.parametrize("bad_url,description", [
+        ("file:///etc/passwd",          "file:// scheme"),
+        ("ftp://example.com/w.json",    "ftp:// scheme"),
+        ("data:application/json,{}",    "data: scheme"),
+        ("",                            "empty URL"),
+    ])
+    def test_non_https_url_raises_value_error(
+        self, bad_url: str, description: str
+    ) -> None:
+        """
+        MODEL-I5: download_weights must raise ValueError for any non-HTTPS URL.
+
+        No mock needed — the scheme check fires before any network I/O.
+        """
+        with pytest.raises(ValueError):
+            _model_sync.download_weights(  # type: ignore[attr-defined]
+                url=bad_url,
+                expected_hash="a" * 64,
+            )
+
+    def test_redirect_downgrade_to_http_raises_value_error(self) -> None:
+        """
+        MODEL-I5: If an HTTPS URL redirects to http://, download_weights must
+        raise ValueError — no silent downgrade to plain HTTP.
+
+        Simulates the scenario by making build_opener().open() raise ValueError
+        with the message that _HTTPSOnlyRedirectHandler would produce, then
+        verifying that download_weights propagates it.
+        """
+        from unittest.mock import patch, MagicMock
+
+        redirect_error = ValueError(
+            "MODEL-I5 violation: redirect to non-HTTPS scheme 'http' rejected "
+            "(target: 'http://example.com/model.json')"
+        )
+
+        mock_opener = MagicMock()
+        mock_opener.open.side_effect = redirect_error
+
+        with patch("urllib.request.build_opener", return_value=mock_opener):
+            with pytest.raises(ValueError, match=r"(?i)redirect|https|MODEL-I5"):
+                _model_sync.download_weights(  # type: ignore[attr-defined]
+                    url="https://example.com/model.json",
+                    expected_hash="a" * 64,
+                )
