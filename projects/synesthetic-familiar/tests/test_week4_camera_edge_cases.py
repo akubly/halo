@@ -123,10 +123,17 @@ class TestModelSyncHashMismatch:
         # The tampered content produces a different hash — pass the original hash
         # so the check will fail on the tampered data.
 
-        def _mock_urlopen(req, *args, **kwargs):
+        mock_called = False
+
+        def _mock_open(req, timeout=None):
+            nonlocal mock_called
+            mock_called = True
             return _make_mock_response(tampered)
 
-        with patch("urllib.request.urlopen", side_effect=_mock_urlopen):
+        mock_opener = MagicMock()
+        mock_opener.open.side_effect = _mock_open
+
+        with patch("urllib.request.build_opener", return_value=mock_opener):
             rejected = False
             try:
                 result = _model_sync.download_weights(  # type: ignore[attr-defined]
@@ -146,6 +153,11 @@ class TestModelSyncHashMismatch:
 
         assert rejected, (
             f"download_weights must reject tampered content ({description})."
+        )
+        assert mock_called, (
+            f"Hash-mismatch mock was never invoked for '{description}' — "
+            "patch target may be wrong (should be urllib.request.build_opener). "
+            "The test cannot be meaningful without intercepting the download."
         )
 
     def test_hash_mismatch_does_not_modify_global_state(self) -> None:
@@ -219,10 +231,17 @@ class TestModelSyncServerUnreachable:
         download_weights (or a higher-level wrapper) must catch network errors
         and return None / fallback weights — never propagate to main().
         """
-        def _mock_urlopen(req, *args, **kwargs):
+        mock_called = False
+
+        def _mock_open(req, timeout=None):
+            nonlocal mock_called
+            mock_called = True
             raise error_type
 
-        with patch("urllib.request.urlopen", side_effect=_mock_urlopen):
+        mock_opener = MagicMock()
+        mock_opener.open.side_effect = _mock_open
+
+        with patch("urllib.request.build_opener", return_value=mock_opener):
             try:
                 result = _model_sync.download_weights(  # type: ignore[attr-defined]
                     url="https://example.com/model.json",
@@ -241,6 +260,12 @@ class TestModelSyncServerUnreachable:
                     "Only network-related exceptions (OSError, TimeoutError) may propagate."
                 )
 
+        assert mock_called, (
+            f"Network error mock was not invoked for '{description}' — "
+            "patch target may be wrong (should be urllib.request.build_opener). "
+            "Without this the test cannot exercise the error-handling path."
+        )
+
     def test_get_weights_with_fallback_returns_defaults_on_error(self) -> None:
         """
         A higher-level get_weights_with_fallback() (or equivalent) must return
@@ -258,10 +283,17 @@ class TestModelSyncServerUnreachable:
                 "add a fallback-aware entry point and update this test."
             )
 
-        def _mock_urlopen(req, *args, **kwargs):
+        mock_called = False
+
+        def _mock_open(req, timeout=None):
+            nonlocal mock_called
+            mock_called = True
             raise OSError("No route to host")
 
-        with patch("urllib.request.urlopen", side_effect=_mock_urlopen):
+        mock_opener = MagicMock()
+        mock_opener.open.side_effect = _mock_open
+
+        with patch("urllib.request.build_opener", return_value=mock_opener):
             try:
                 result = fn(url="https://example.com/model.json", expected_hash="a" * 64)
             except Exception as exc:
@@ -270,6 +302,11 @@ class TestModelSyncServerUnreachable:
                     "This function must never raise — it always returns local defaults."
                 )
 
+        assert mock_called, (
+            "Fallback mock was not invoked — "
+            "patch target may be wrong (should be urllib.request.build_opener). "
+            "Without this the test cannot verify offline fallback behaviour."
+        )
         assert result is not None, (
             "get_weights_with_fallback must return non-None even when server is unreachable."
         )

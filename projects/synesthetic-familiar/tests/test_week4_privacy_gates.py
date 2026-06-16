@@ -314,7 +314,15 @@ class TestCameraI6_NoImageDataInLogs:
         logger_name: str,
         action: "types.FunctionType",
     ) -> list[logging.LogRecord]:
-        """Capture log records at INFO+ from the named logger during action()."""
+        """Capture log records at INFO+ from the named logger during action().
+
+        Forces the target logger to INFO level for the duration so that INFO
+        records are not silently filtered before reaching the capture handler
+        (e.g. when pytest sets the root logger to WARNING).  Restores the
+        original level and propagation setting afterwards to avoid test
+        interference.  Without this, a CAMERA-I6 violation at INFO level would
+        pass vacuously — the record would be discarded before the handler fires.
+        """
         records: list[logging.LogRecord] = []
 
         class _Capture(logging.Handler):
@@ -323,12 +331,22 @@ class TestCameraI6_NoImageDataInLogs:
                     records.append(record)
 
         handler = _Capture()
+        handler.setLevel(logging.INFO)
         target_logger = logging.getLogger(logger_name)
+        saved_level = target_logger.level
+        saved_propagate = target_logger.propagate
+        # Ensure INFO records reach the handler regardless of the logger's
+        # inherited effective level (pytest default is WARNING on the root logger).
+        if saved_level == logging.NOTSET or saved_level > logging.INFO:
+            target_logger.setLevel(logging.INFO)
+        target_logger.propagate = False  # avoid double-counting via root logger
         target_logger.addHandler(handler)
         try:
             action()
         finally:
             target_logger.removeHandler(handler)
+            target_logger.setLevel(saved_level)
+            target_logger.propagate = saved_propagate
         return records
 
     def test_sensorframe_construction_emits_no_image_bytes_in_logs(self) -> None:
@@ -363,11 +381,28 @@ class TestCameraI6_NoImageDataInLogs:
                 f"CAMERA-I6 VIOLATION: JPEG SOI marker in log. "
                 f"Message: {record.getMessage()!r}"
             )
-            for banned in ("pixel", "jpeg", "jpg", "raw_frame", "image_data"):
+            # CAMERA-I6: ban actual image-content leakage (pixel data, raw buffer
+            # references, explicit dimension strings).  The bare words "jpeg" and
+            # "jpg" are intentionally NOT banned — they appear in benign diagnostic
+            # messages such as "JPEG decode failed" and are not content leakage.
+            for banned in ("pixel", "raw_frame", "image_data"):
                 assert banned not in msg, (
                     f"CAMERA-I6 VIOLATION: log record contains '{banned}' at INFO+ level. "
                     f"Message: {record.getMessage()!r}. "
-                    "Raw image terminology must not appear in INFO+ logs."
+                    "Image content terminology must not appear in INFO+ logs."
+                )
+            # Ban bytes-repr leakage (e.g. b'\xff\xd8...') and explicit
+            # dimension / byte-count patterns that would expose image geometry.
+            import re as _re
+            _bytes_repr = _re.compile(r"b'\\x[0-9a-f]{2}", _re.IGNORECASE)
+            assert not _bytes_repr.search(msg), (
+                f"CAMERA-I6 VIOLATION: bytes repr in INFO+ log indicates raw image "
+                f"content leakage. Message: {record.getMessage()!r}"
+            )
+            for dim_kw in ("width=", "height=", "dimensions=", "byte_count="):
+                assert dim_kw not in msg, (
+                    f"CAMERA-I6 VIOLATION: dimension/byte-count key '{dim_kw}' in INFO+ log. "
+                    f"Message: {record.getMessage()!r}"
                 )
 
     def test_camera_relay_extraction_logs_no_pixel_data(self) -> None:

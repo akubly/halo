@@ -289,3 +289,74 @@ passing.  Skips are exclusively Ng's deferred `_CameraRelay` tests.
 ---
 
 📌 Team update (2026-06-15T05:37:29Z): Week-4 camera SDK gate resolved BLOCKED (CAMERA-I3); Librarian shipped Option-C cloud sync; Juanita delivered 53 new tests (296 passed, 22 skipped); Raven approved with 6 merge-blocking conditions. Phase-2 shipping cloud-refinement; camera deferred Phase-3 — decided by Ng, Librarian, Juanita, Raven
+
+---
+
+## 2026-06-15 — PR #5 Copilot Review Fixes (5 comments)
+
+**Branch:** `synesthetic-familiar/week4-it-sees`
+**Files touched:** `tests/test_week4_privacy_gates.py`, `tests/test_week4_camera_edge_cases.py`
+
+### Fixes delivered
+
+**C1 — Force logger level in `_collect_logs_above_debug`**
+
+pytest sets the root logger to WARNING by default.  `_collect_logs_above_debug` was
+adding a capture handler but not touching the target logger's level — so INFO records
+were discarded by the logger before reaching the handler, making any CAMERA-I6 test
+that expected INFO violations pass vacuously.
+
+Fix: save the target logger's level, force it to `logging.INFO` if it was NOTSET or
+higher than INFO, and restore it in the `finally` block.  Also set `propagate = False`
+during capture to prevent double-counting via the root logger.
+
+**C2 — Align CAMERA-I6 banned list to image content, not the word "jpeg"/"jpg"**
+
+The previous banned list included the bare words `"jpeg"` and `"jpg"`, which would
+wrongly fail a benign diagnostic message like `"JPEG decode failed"`.  CAMERA-I6 bans
+image *content* (bytes, pixel data, dimensions) — not terminology.
+
+Fix: removed `"jpeg"` and `"jpg"` from the banned word list; retained `"pixel"`,
+`"raw_frame"`, `"image_data"`.  Added a regex check for `bytes` repr patterns
+(`b'\xNN...`) and keyword checks for explicit dimension keys (`width=`, `height=`,
+`dimensions=`, `byte_count=`).
+
+**C3/C4/C5 — Patch `build_opener` (not `urlopen`) in camera_edge_cases.py**
+
+`download_weights()` calls `_download_bytes()` which uses
+`urllib.request.build_opener(...).open(req, timeout=...)`.  Three tests in
+`test_week4_camera_edge_cases.py` were patching `urllib.request.urlopen` — a
+completely different code path — so the real implementation was never intercepted.
+For C3 this meant the hash-mismatch test could hit the real network or swallow
+a real error.  For C4/C5, the tests could mask a crash or silently pass with
+real network traffic.
+
+Fix: replaced all three `patch("urllib.request.urlopen", ...)` patterns with
+`patch("urllib.request.build_opener", return_value=mock_opener)` where
+`mock_opener.open.side_effect` delivers the intended response or raises the
+intended error.  Added a `assert mock_called` sentinel to each test so they
+can never pass vacuously without touching the mock.
+
+### Result
+
+**304 passed, 19 skipped, 0 failed.**  All 19 skips are Ng's deferred `_CameraRelay`
+tests.  No behaviour change to passing tests.
+
+## Learnings
+
+- **Force logger level for log-capture tests:** Attaching a `logging.Handler` is not
+  enough — if the logger's effective level is WARNING (pytest default), INFO records
+  are silently discarded before reaching any handler.  Always save and set the target
+  logger to `logging.INFO` for the duration of the capture, then restore.
+
+- **Align CAMERA-I6 assertions to image content, not the word "jpeg":** CAMERA-I6
+  bans image *content* leakage (bytes repr, pixel data, dimensions) — not the English
+  word "jpeg", which can appear innocuously in diagnostic messages.  Banning the word
+  itself would produce false positives on benign log lines like "JPEG decode failed".
+
+- **The `build_opener` patch lesson extends to camera_edge_cases.py too:** Every test
+  that exercises `download_weights()` (or any function that calls `_download_bytes()`)
+  must patch `urllib.request.build_opener`.  Patching `urlopen` leaves the production
+  code path completely untouched — the test either hits the real network or silently
+  ignores a crash.  Always add a `mock_called` sentinel assertion so the test fails
+  loudly if the patch target drifts again.
