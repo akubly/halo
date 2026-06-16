@@ -86,8 +86,8 @@ class TestModelSyncHashMismatch:
     rejected before being applied to inference weights.
 
     Expected contract for download_weights(url, expected_hash):
-      - Returns the parsed weights dict when sha256(content) == expected_hash.
-      - Raises ValueError (or returns None/falsy) when hash doesn't match.
+      - Returns raw verified bytes when sha256(content) == expected_hash.
+      - Returns None when hash doesn't match (content discarded, no raise).
       - Does NOT modify any global weight state when hash is wrong.
     """
 

@@ -360,3 +360,5 @@ tests.  No behaviour change to passing tests.
   code path completely untouched — the test either hits the real network or silently
   ignores a crash.  Always add a `mock_called` sentinel assertion so the test fails
   loudly if the patch target drifts again.
+
+- **Keep test docstrings aligned to the real function contract:** `download_weights` returns `bytes | None` (raw verified bytes, or `None` on hash mismatch) — it does NOT return a parsed weights dict and does NOT raise on hash mismatch (only on non-HTTPS scheme or network error).
