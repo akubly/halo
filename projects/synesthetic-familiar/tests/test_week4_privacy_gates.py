@@ -533,6 +533,10 @@ class TestModelI5_ModelSyncPrivacy:
         """
         MODEL-I5: Downloaded weights must be hash-verified before applying.
         A corrupt or tampered model must be rejected (not applied).
+
+        Patches urllib.request.build_opener so opener.open() returns fake bytes
+        whose hash does NOT match the expected hash — verifying the hash-before-apply
+        gate is enforced fail-closed and that the mock is actually hit.
         """
         from unittest.mock import patch, MagicMock
 
@@ -540,16 +544,22 @@ class TestModelI5_ModelSyncPrivacy:
         correct_hash = __import__("hashlib").sha256(fake_weights).hexdigest()
         wrong_hash = "a" * 64  # valid hex length, wrong content
 
-        def _mock_urlopen(req, *args, **kwargs):
+        mock_called = False
+
+        def _mock_open(req, timeout=None):
+            nonlocal mock_called
+            mock_called = True
             response = MagicMock()
             response.read.return_value = fake_weights
             response.__enter__ = lambda s: s
             response.__exit__ = MagicMock(return_value=False)
             return response
 
-        with patch("urllib.request.urlopen", side_effect=_mock_urlopen):
+        mock_opener = MagicMock()
+        mock_opener.open.side_effect = _mock_open
+
+        with patch("urllib.request.build_opener", return_value=mock_opener):
             # Should raise (or return None/failure) when hash doesn't match
-            raised = False
             try:
                 result = _model_sync.download_weights(  # type: ignore[attr-defined]
                     url="https://example.com/model.json",
@@ -564,12 +574,14 @@ class TestModelI5_ModelSyncPrivacy:
                         f"{correct_hash!r}."
                     )
             except (ValueError, RuntimeError, OSError, Exception) as exc:
-                raised = True
                 # Acceptable — any exception on hash mismatch is correct behavior
                 assert exc is not None  # suppress linter
 
-        # At least one of: raised exception, or returned falsy result
-        # (we checked the falsy path above — here we accept the raised path)
+        assert mock_called, (
+            "MODEL-I5 VIOLATION: The download mock was never invoked — "
+            "the hash-before-apply gate was not exercised. "
+            "Patch target may be wrong (should be urllib.request.build_opener)."
+        )
 
     def test_correct_hash_accepts_weights(self) -> None:
         """

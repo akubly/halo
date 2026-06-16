@@ -282,6 +282,7 @@ passing.  Skips are exclusively Ng's deferred `_CameraRelay` tests.
 
 - **Vacuous pass via unknown key dict:** `apply_weight_update` silently ignores keys not in `{visual_activity, visual_brightness}`.  Using wrong-namespace keys in an extreme-update dict produces a no-op; the bounds assertion loop runs zero iterations.  Always assert key presence before asserting values.
 - **build_opener patching:** After Librarian changed `_download_bytes` to `build_opener().open()`, any `urlopen` patch is a no-op.  Patch the function the production code actually invokes (`urllib.request.build_opener`) and configure its return value's `.open()` method.
+- **build_opener patch scope is ALL model_sync privacy tests:** The urlopen→build_opener patch-target lesson applies to every MODEL-I5 test in `test_week4_privacy_gates.py`, not just the two (no-user-id, correct-hash) fixed in the first pass — `test_hash_verified_before_applying_weights` required the same fix in Cycle 2.
 - **Negative-scheme coverage:** `file://`, `ftp://`, `data:`, and `""` URLs all trigger the scheme check in `_download_bytes` before any network connection.  No mock needed for these cases — the `ValueError` fires synchronously.
 - **Pure-functional state-isolation test:** For pure-functional APIs with no global state, prove fail-closed behaviour by passing a sentinel `current` and asserting `result == current` — no getter required.
 
