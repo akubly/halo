@@ -311,7 +311,8 @@ def sync_population_weights(
         • server unreachable            → keep current (offline-capable)
         • SHA-256 mismatch              → discard download, keep current (MODEL-I5)
         • parse / validation error      → keep current
-        • any unexpected exception      → keep current (logged as ERROR)
+        • download exception            → keep current (logged as WARNING)
+        • unexpected tuning exception   → keep current (logged as ERROR)
 
     MODEL-I5: the HTTP GET request carries ZERO user-identifying data.
     See module docstring for the full no-egress proof.
