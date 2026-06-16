@@ -5,6 +5,10 @@ Computes mood from mic + IMU signals entirely on host (no cloud, no on-device ML
 Confidence gating: host is the single authority — if confidence < 0.7, do NOT
 update Familiar state (silence is safer than hallucination, LIBRARIAN-T2-5-ERROR).
 
+Phase-2 addition: optional camera modality (visual_activity + visual_brightness)
+folded into tension as ADDITIVE terms when camera_ok=True.  camera_ok=False (the
+default) produces EXACTLY the Phase-1 result — camera is purely additive.
+
 Mood enum (matches wire format, ARD §5.2):
   0 = neutral
   1 = calm
@@ -34,6 +38,12 @@ CONFIDENCE_GATE: float = 0.7
 POPULATION_STRESS_THRESHOLD: float = STRESS_THRESHOLD
 POPULATION_CALM_THRESHOLD: float = CALM_THRESHOLD
 
+# Phase-1 locked tension weights (ARD §5.4 — IMMUTABLE; never altered by online tuning).
+# camera_ok=False path uses ONLY these three constants, guaranteeing exact Phase-1 output.
+_W_PITCH: float = 0.4
+_W_ACCEL: float = 0.3
+_W_ROT: float = 0.3
+
 # Activation gate — ARD §5.4 "first 3 days: population defaults; after: personal mean+1.5σ".
 #
 # Threshold: n ≥ 50 Welford samples (resolved from OPEN decision 2026-06-12).
@@ -62,6 +72,129 @@ MOOD_TO_INT: dict[str, int] = {
 }
 
 _BASELINE_PATH: Path = Path("~/.vesper/baseline.json").expanduser()
+
+
+# ── Visual weights (Phase-2 camera modality) ──────────────────────────────────
+#
+# Phase-2 adds a camera modality: visual_activity + visual_brightness are folded
+# into the tension score as ADDITIVE terms, gated by camera_ok.
+#
+# ADDITIVE INVARIANT (locked): camera_ok=False → exact Phase-1 result.
+# Visual weights are the ONLY tunable parameters; Phase-1 weights (_W_PITCH,
+# _W_ACCEL, _W_ROT) are immutable constants — they never appear in VisualWeights.
+#
+# Tuning bound (Hiro risk mitigation, §6.1):
+#   No weight may exceed MAX_VISUAL_WEIGHT_MULTIPLIER (2×) its default value.
+#   EMA smoothing guards against oscillation; clamp enforces the hard bound.
+#
+# Formula when camera_ok=True (additive on top of Phase-1 tension):
+#   tension += visual_activity × W_va  +  (1 − visual_brightness) × W_vb
+#
+#   Rationale:
+#     visual_activity: high scene movement → more alert/stressed → positive weight
+#     (1 − visual_brightness): dark scene → more tense; bright scene → calmer
+#     Both terms map [0, 1] inputs with positive weights for clean arithmetic.
+
+@dataclasses.dataclass
+class VisualWeights:
+    """
+    Tunable additive weights for the camera modality (Phase-2).
+
+    These are strictly ADDITIVE contributions to the Phase-1 tension score,
+    applied only when camera_ok=True.  Phase-1 audio/IMU weights (_W_PITCH,
+    _W_ACCEL, _W_ROT) are immutable constants — they are NOT in this class.
+
+    Bounds: each weight must stay in [0, DEFAULT × MAX_VISUAL_WEIGHT_MULTIPLIER].
+    use tune_visual_weights() and reset_visual_weights() to update safely.
+    """
+    visual_activity: float = 0.15    # scene movement → tension (positive weight)
+    visual_brightness: float = 0.05  # applied as (1.0 − brightness) → tension
+
+
+DEFAULT_VISUAL_WEIGHTS: VisualWeights = VisualWeights()
+MAX_VISUAL_WEIGHT_MULTIPLIER: float = 2.0   # Hiro risk bound: no weight > 2× default
+_EMA_ALPHA: float = 0.1                      # default EMA learning rate for weight tuning
+_VISUAL_WEIGHTS_PATH: Path = Path("~/.vesper/visual_weights.json").expanduser()
+
+
+def load_visual_weights(path: Path = _VISUAL_WEIGHTS_PATH) -> VisualWeights:
+    """Load visual weights from disk. Returns DEFAULT_VISUAL_WEIGHTS on any error."""
+    try:
+        file_size = path.stat().st_size
+        if file_size > 4096:
+            raise ValueError(
+                f"visual_weights file too large ({file_size} bytes) — skipping"
+            )
+        data = json.loads(path.read_text(encoding="utf-8"))
+        va = data["visual_activity"]
+        vb = data["visual_brightness"]
+        def _is_bounded_real(v: object) -> bool:
+            return (
+                isinstance(v, (int, float)) and not isinstance(v, bool)
+                and math.isfinite(float(v)) and float(v) >= 0.0
+            )
+        if not (_is_bounded_real(va) and _is_bounded_real(vb)):
+            raise ValueError(
+                f"visual weight out of range: visual_activity={va!r}, visual_brightness={vb!r}"
+            )
+        return VisualWeights(visual_activity=float(va), visual_brightness=float(vb))
+    except (OSError, json.JSONDecodeError, TypeError, KeyError, ValueError) as exc:
+        logger.warning(
+            "[VisualWeights] failed to load from %s: %s — using defaults", path, exc
+        )
+        return VisualWeights()
+
+
+def save_visual_weights(weights: VisualWeights, path: Path = _VISUAL_WEIGHTS_PATH) -> None:
+    """Persist visual weights atomically (write tmp → rename)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".json.tmp")
+    tmp.write_text(
+        json.dumps(dataclasses.asdict(weights), indent=2), encoding="utf-8"
+    )
+    tmp.replace(path)
+
+
+def reset_visual_weights() -> VisualWeights:
+    """Return factory-default visual weights (does NOT write to disk)."""
+    return VisualWeights()
+
+
+def tune_visual_weights(
+    current: VisualWeights,
+    target: VisualWeights,
+    alpha: float = _EMA_ALPHA,
+) -> VisualWeights:
+    """
+    Bounded EMA blend of current visual weights toward target.
+
+    EMA formula:  new_w = (1 − α) × current + α × target
+    Hard bound:   each weight is clamped to [0, DEFAULT × MAX_VISUAL_WEIGHT_MULTIPLIER].
+
+    Divergence guard: if a weight approaches the bound (≥ 90 % of max), a warning
+    is emitted.  The caller may choose to reset_visual_weights() in response.
+
+    Returns a NEW VisualWeights — does NOT mutate inputs.
+    """
+    max_va = DEFAULT_VISUAL_WEIGHTS.visual_activity * MAX_VISUAL_WEIGHT_MULTIPLIER
+    max_vb = DEFAULT_VISUAL_WEIGHTS.visual_brightness * MAX_VISUAL_WEIGHT_MULTIPLIER
+
+    new_va = (1.0 - alpha) * current.visual_activity + alpha * target.visual_activity
+    new_vb = (1.0 - alpha) * current.visual_brightness + alpha * target.visual_brightness
+
+    # Hard clamp — enforce the ≤ 2× bound
+    new_va = max(0.0, min(new_va, max_va))
+    new_vb = max(0.0, min(new_vb, max_vb))
+
+    # Divergence guard: warn when approaching the bound
+    if new_va >= max_va * 0.9 or new_vb >= max_vb * 0.9:
+        logger.warning(
+            "[VisualWeights] weight approaching bound — possible divergence. "
+            "Consider reset_visual_weights(). va=%.4f (max %.4f), vb=%.4f (max %.4f)",
+            new_va, max_va, new_vb, max_vb,
+        )
+
+    return VisualWeights(visual_activity=new_va, visual_brightness=new_vb)
 
 
 @dataclasses.dataclass
@@ -225,12 +358,29 @@ def compute_mood(
     mic_ok: bool = True,
     imu_ok: bool = True,
     baseline: Baseline | None = None,
+    # Phase-2 camera inputs — camera_ok=False (default) → EXACT Phase-1 result.
+    # The additive invariant is enforced structurally: visual terms are only added
+    # inside the `if camera_ok:` block below.  No camera parameter touches the
+    # Phase-1 tension formula or confidence path when camera_ok=False.
+    visual_activity: float = 0.0,
+    visual_brightness: float = 0.5,
+    camera_ok: bool = False,
+    visual_weights: VisualWeights | None = None,
 ) -> MoodResult:
     """
     Pure function: sensor inputs → MoodResult.  No I/O, no clock, no global state.
 
-    Weights (ARD §5.4, LOCKED):
+    Phase-1 weights (ARD §5.4, LOCKED):
         tension = pitch_variance × 0.4 + acceleration × 0.3 + rotation × 0.3
+
+    Phase-2 camera augmentation (additive, gated by camera_ok):
+        tension += visual_activity × W_va  +  (1 − visual_brightness) × W_vb
+        W_va, W_vb from visual_weights (default DEFAULT_VISUAL_WEIGHTS).
+
+    ADDITIVE INVARIANT: camera_ok=False returns EXACTLY the Phase-1 result.
+    Proof: the camera block is inside `if camera_ok:` — it cannot execute when
+    camera_ok=False.  The Phase-1 tension formula, threshold selection, mood
+    classification, and confidence reduction are all unchanged.
 
     Threshold strategy:
         baseline=None or sample_count < ACTIVATION_THRESHOLD (calibrating)
@@ -243,6 +393,7 @@ def compute_mood(
     Confidence reduction on sensor failure (§2.2):
         mic_ok=False  → confidence × 0.6
         imu_ok=False  → confidence × 0.7
+        camera_ok=False → NO confidence reduction (camera absence is the default)
 
     Caller (main.py) is responsible for:
         • acting on .gated (do not send when True)
@@ -252,12 +403,23 @@ def compute_mood(
     """
     # audio_rms intentionally unused — ARD §5.4 tension formula excludes volume;
     # kept for interface stability / future confidence modulation.
-    # Weighted tension score (locked weights, ARD §5.4)
+
+    # ── Phase-1 tension (LOCKED weights, ARD §5.4) ──────────────────────────
     tension = (
-        audio_pitch_variance * 0.4
-        + imu_acceleration * 0.3
-        + imu_rotation * 0.3
+        audio_pitch_variance * _W_PITCH
+        + imu_acceleration * _W_ACCEL
+        + imu_rotation * _W_ROT
     )
+
+    # ── Phase-2 camera augmentation (additive — only when camera available) ──
+    # ADDITIVE INVARIANT: this block is unreachable when camera_ok=False.
+    if camera_ok:
+        # Guard NaN/inf from corrupt JPEG → invalid feature extraction.
+        # Non-finite inputs are substituted with neutral values (no contribution).
+        va = visual_activity if math.isfinite(visual_activity) else 0.0
+        vb = visual_brightness if math.isfinite(visual_brightness) else 0.5
+        vw = visual_weights if visual_weights is not None else DEFAULT_VISUAL_WEIGHTS
+        tension += va * vw.visual_activity + (1.0 - vb) * vw.visual_brightness
 
     # Select thresholds — activation gate (ARD §5.4; resolved OPEN decision 2026-06-12).
     # Population defaults hold until ACTIVATION_THRESHOLD Welford samples guarantee a
