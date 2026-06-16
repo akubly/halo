@@ -162,3 +162,17 @@ The HTTP GET carries: `Host`, `User-Agent: Python-urllib/<version>`, `Accept-Enc
 ---
 
 📌 Team update (2026-06-15T05:37:29Z): Week-4 camera SDK gate resolved BLOCKED (CAMERA-I3); Librarian shipped Option-C cloud sync (model_sync.py, VisualWeights, EMA tuning); Juanita delivered 53 new tests (296 passed, 22 skipped); Raven approved with 6 merge-blocking conditions. Phase-2 shipping cloud-refinement; camera deferred Phase-3 — decided by Ng, Librarian, Juanita, Raven
+
+## Week 4 Persona-Review Cycle 1 Fixes (2026-06-15)
+
+### Learnings
+
+**Functional-API decision (I1):** `apply_weight_update` now takes an explicit `current: VisualWeights` parameter and EMA-blends FROM it, not hardcoded from `DEFAULT_VISUAL_WEIGHTS`. `get_current_weights()` was removed entirely — it encoded a lie (there IS no module-level mutable weight state). The module docstring now declares explicitly: "this module is pure-functional; callers own and persist current weights." Lesson: any helper function that hands out a snapshot of state that doesn't exist is a design smell. Callers must own state; the module must make that explicit.
+
+**Redirect-downgrade hardening (I2):** `_download_bytes` now uses `build_opener(_HTTPSOnlyRedirectHandler()).open(...)` instead of `urlopen`. The handler subclasses `urllib.request.HTTPRedirectHandler` and raises `ValueError` (referencing MODEL-I5) on any redirect whose target scheme isn't `https`. Initial scheme validation (`parsed.scheme != "https"`) is preserved as a first-line check; the redirect handler is defense-in-depth. Side effect: tests that mock `urllib.request.urlopen` will no longer intercept these calls — they must instead mock the opener path. Worth flagging to Juanita.
+
+**Version enforcement (I4):** `_parse_population_weights` now checks `obj.get("version") != "1"` and raises `ValueError` immediately. The payload is rejected before any field is extracted. Fail-fast with an explicit message beats a silent v1 assumption that becomes a silent v2 vulnerability later. Schema versioning is only as strong as the boundary that enforces it.
+
+**Dormant-sync documentation (I5 + I6):** The model_sync.py docstring now declares:
+  - This sync capability is NOT yet wired into the runtime loop (ships Week 4, activates Phase 3 alongside camera — intentional).
+  - Trust model: integrity rests on HTTPS + SHA-256; no host allowlist, cert pinning, or signed manifest; acceptable for single-user playground; hardening path = signed manifest + host pinning.

@@ -16,6 +16,29 @@ STAYS LOCAL (never leaves host):
     All raw sensor data    — audio, IMU, camera features
     All mood inference     — MoodResult values never transmitted to any server
 
+─── PURE-FUNCTIONAL API ──────────────────────────────────────────────────────
+
+This module is pure-functional: there is NO internal mutable weight state.
+Callers own and persist current weights.  Every function that performs an EMA
+blend takes `current: VisualWeights` as an explicit argument and returns a new
+VisualWeights — no module-level weight variable is mutated.
+
+─── DORMANT CAPABILITY (Phase-3 activation) ──────────────────────────────────
+
+The sync capability shipped in Week 4 is NOT yet wired into the runtime loop.
+It will activate alongside the camera in Phase 3 — population visual-weights
+have nothing live to tune while the camera is deferred.  This is intentional,
+not an oversight.  The code ships now so the architecture review can happen
+before Phase 3 integration.
+
+─── TRUST MODEL ──────────────────────────────────────────────────────────────
+
+Integrity rests on HTTPS transport + SHA-256 content verification (MODEL-I5).
+There is NO host allowlist, certificate pinning, or signed manifest.  This is
+acceptable for a single-user playground environment.  Future hardening path:
+  1. Signed manifest (e.g. GPG or ECDSA over the weights JSON + expected hash)
+  2. Host pinning (allowlist of permitted server hostnames/certificates)
+
 ─── NO-EGRESS PROOF (MODEL-I5) ──────────────────────────────────────────────
 
 The sync operation is a single HTTP GET request to a static HTTPS URL.
@@ -59,15 +82,16 @@ from __future__ import annotations
 
 import dataclasses
 import hashlib
+import hmac
 import json
 import logging
 import math
 import urllib.parse
 import urllib.request
-from typing import Optional
 
 from host.inference import (
     DEFAULT_VISUAL_WEIGHTS,
+    MAX_VISUAL_WEIGHT_MULTIPLIER,
     VisualWeights,
     reset_visual_weights,
     tune_visual_weights,
@@ -101,7 +125,7 @@ class PopulationManifest:
 
 
 # No default manifest yet — sync is a no-op until a release is published.
-DEFAULT_MANIFEST: Optional[PopulationManifest] = None
+DEFAULT_MANIFEST: PopulationManifest | None = None
 
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
@@ -112,11 +136,14 @@ def _download_bytes(url: str, timeout_s: float = _DOWNLOAD_TIMEOUT_S) -> bytes:
 
     MODEL-I5 enforcement:
         • Scheme MUST be "https" — raises ValueError on any other scheme.
+        • Redirects whose target scheme is not "https" are rejected with
+          ValueError (MODEL-I5: no silent downgrade to plain HTTP).
         • No custom headers are added.  urllib's default headers only.
         • Size-limited to _MAX_WEIGHTS_FILE_BYTES.
 
     Raises:
-        ValueError  — scheme is not "https" or file exceeds size limit
+        ValueError  — scheme is not "https", redirect downgrades to non-HTTPS,
+                      or file exceeds size limit
         OSError / urllib.error.URLError — network failure (let caller handle)
     """
     parsed = urllib.parse.urlparse(url)
@@ -125,10 +152,22 @@ def _download_bytes(url: str, timeout_s: float = _DOWNLOAD_TIMEOUT_S) -> bytes:
             f"MODEL-I5 violation: only HTTPS is permitted; got scheme '{parsed.scheme}'"
         )
 
+    class _HTTPSOnlyRedirectHandler(urllib.request.HTTPRedirectHandler):
+        """Reject any redirect whose target URL is not HTTPS."""
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            target = urllib.parse.urlparse(newurl)
+            if target.scheme != "https":
+                raise ValueError(
+                    f"MODEL-I5 violation: redirect to non-HTTPS scheme "
+                    f"'{target.scheme}' rejected (target: {newurl!r})"
+                )
+            return super().redirect_request(req, fp, code, msg, headers, newurl)
+
     req = urllib.request.Request(url)
     # No req.add_header() calls — MODEL-I5: no custom headers.
 
-    with urllib.request.urlopen(req, timeout=timeout_s) as resp:  # noqa: S310
+    opener = urllib.request.build_opener(_HTTPSOnlyRedirectHandler())
+    with opener.open(req, timeout=timeout_s) as resp:  # noqa: S310
         data = resp.read(_MAX_WEIGHTS_FILE_BYTES + 1)
 
     if len(data) > _MAX_WEIGHTS_FILE_BYTES:
@@ -140,9 +179,9 @@ def _download_bytes(url: str, timeout_s: float = _DOWNLOAD_TIMEOUT_S) -> bytes:
 
 
 def _verify_sha256(data: bytes, expected_hex: str) -> bool:
-    """Return True iff SHA-256(data) == expected_hex (case-insensitive)."""
+    """Return True iff SHA-256(data) == expected_hex (timing-safe comparison)."""
     actual = hashlib.sha256(data).hexdigest()
-    return actual == expected_hex.lower().strip()
+    return hmac.compare_digest(actual, expected_hex.lower().strip())
 
 
 def _parse_population_weights(data: bytes) -> VisualWeights | None:
@@ -156,10 +195,27 @@ def _parse_population_weights(data: bytes) -> VisualWeights | None:
           "visual_brightness": <float ≥ 0>
         }
 
+    Version enforcement: "version" must be present and equal to "1".
+    Unknown or missing versions are rejected with ValueError (fail-fast).
+
+    Bounds enforcement (defense in depth, §6.1): each weight must not exceed
+    DEFAULT_VISUAL_WEIGHTS.<field> × MAX_VISUAL_WEIGHT_MULTIPLIER.  This is
+    enforced here at the trust boundary in addition to the downstream clamp in
+    tune_visual_weights.
+
     Returns None on any parse or validation failure.
     """
     try:
         obj = json.loads(data.decode("utf-8"))
+
+        # ── Version enforcement (I4) ──────────────────────────────────────────
+        version = obj.get("version")
+        if version != "1":
+            raise ValueError(
+                f"unsupported or missing schema version: {version!r} "
+                f"(expected \"1\") — rejecting payload"
+            )
+
         va = float(obj["visual_activity"])
         vb = float(obj["visual_brightness"])
         if not (math.isfinite(va) and math.isfinite(vb)):
@@ -170,6 +226,19 @@ def _parse_population_weights(data: bytes) -> VisualWeights | None:
             raise ValueError(
                 f"negative weights not permitted: visual_activity={va}, visual_brightness={vb}"
             )
+
+        # ── Bounds enforcement at trust boundary (M2) ─────────────────────────
+        max_va = DEFAULT_VISUAL_WEIGHTS.visual_activity * MAX_VISUAL_WEIGHT_MULTIPLIER
+        max_vb = DEFAULT_VISUAL_WEIGHTS.visual_brightness * MAX_VISUAL_WEIGHT_MULTIPLIER
+        if va > max_va:
+            raise ValueError(
+                f"visual_activity={va} exceeds 2× default bound ({max_va}) — rejecting"
+            )
+        if vb > max_vb:
+            raise ValueError(
+                f"visual_brightness={vb} exceeds 2× default bound ({max_vb}) — rejecting"
+            )
+
         return VisualWeights(visual_activity=va, visual_brightness=vb)
     except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
         logger.warning("[ModelSync] failed to parse population weights JSON: %s", exc)
@@ -311,23 +380,20 @@ def sync_population_weights(
 
 # ── Weight state helpers (online tuning support) ─────────────────────────────
 
-def get_current_weights() -> dict:
-    """
-    Return DEFAULT_VISUAL_WEIGHTS as a plain dict.
-
-    Useful for testing: callers can snapshot weights before and after a sync
-    attempt to verify that a failed sync leaves state unchanged.
-    """
-    return dataclasses.asdict(DEFAULT_VISUAL_WEIGHTS)
-
-
-def apply_weight_update(update: dict, alpha: float = 0.1) -> dict:
+def apply_weight_update(
+    update: dict,
+    alpha: float = 0.1,
+    current: VisualWeights = DEFAULT_VISUAL_WEIGHTS,
+) -> dict:
     """
     Apply an EMA weight update from a dict and return the updated weights dict.
 
-    Recognises the visual-modality keys ("visual_activity", "visual_brightness").
-    Unknown keys are silently ignored — this function is tolerant of arbitrary
-    population-model formats so it can evolve without breaking callers.
+    Args:
+        update   Dict with optional keys "visual_activity" and/or
+                 "visual_brightness".  Unknown keys are silently ignored.
+        alpha    EMA learning rate (default 0.1).
+        current  Base VisualWeights to blend FROM.  Callers own weight state
+                 and pass their current weights here; the module keeps none.
 
     The ≤ 2× default bound is enforced via tune_visual_weights (no weight ever
     exceeds MAX_VISUAL_WEIGHT_MULTIPLIER × its default, regardless of input).
@@ -342,7 +408,7 @@ def apply_weight_update(update: dict, alpha: float = 0.1) -> dict:
             update.get("visual_brightness", DEFAULT_VISUAL_WEIGHTS.visual_brightness)
         ),
     )
-    result = tune_visual_weights(DEFAULT_VISUAL_WEIGHTS, target, alpha=alpha)
+    result = tune_visual_weights(current, target, alpha=alpha)
     return dataclasses.asdict(result)
 
 

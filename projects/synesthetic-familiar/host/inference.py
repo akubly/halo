@@ -6,8 +6,9 @@ Confidence gating: host is the single authority — if confidence < 0.7, do NOT
 update Familiar state (silence is safer than hallucination, LIBRARIAN-T2-5-ERROR).
 
 Phase-2 addition: optional camera modality (visual_activity + visual_brightness)
-folded into tension as ADDITIVE terms when camera_ok=True.  camera_ok=False (the
-default) produces EXACTLY the Phase-1 result — camera is purely additive.
+folded into tension as ADDITIVE terms when camera_ok is True (strict identity check).
+camera_ok is not True (the default False) produces EXACTLY the Phase-1 result —
+camera is purely additive.
 
 Mood enum (matches wire format, ARD §5.2):
   0 = neutral
@@ -377,10 +378,12 @@ def compute_mood(
         tension += visual_activity × W_va  +  (1 − visual_brightness) × W_vb
         W_va, W_vb from visual_weights (default DEFAULT_VISUAL_WEIGHTS).
 
-    ADDITIVE INVARIANT: camera_ok=False returns EXACTLY the Phase-1 result.
-    Proof: the camera block is inside `if camera_ok:` — it cannot execute when
-    camera_ok=False.  The Phase-1 tension formula, threshold selection, mood
-    classification, and confidence reduction are all unchanged.
+    ADDITIVE INVARIANT: camera_ok is not True returns EXACTLY the Phase-1 result.
+    Proof: the camera block is inside `if camera_ok is True:` — it cannot execute
+    unless camera_ok is the exact bool True.  Truthy-but-not-bool values (e.g. 1,
+    non-empty strings) are excluded by the strict identity check (CAMERA-I6).
+    The Phase-1 tension formula, threshold selection, mood classification, and
+    confidence reduction are all unchanged when camera_ok is not True.
 
     Threshold strategy:
         baseline=None or sample_count < ACTIVATION_THRESHOLD (calibrating)
@@ -412,14 +415,24 @@ def compute_mood(
     )
 
     # ── Phase-2 camera augmentation (additive — only when camera available) ──
-    # ADDITIVE INVARIANT: this block is unreachable when camera_ok=False.
-    if camera_ok:
+    # ADDITIVE INVARIANT: this block is unreachable when camera_ok is not True.
+    # Strict identity check (is True) ensures truthy-but-not-bool values (e.g. 1,
+    # non-empty strings) do NOT accidentally unlock the camera path (CAMERA-I6).
+    if camera_ok is True:
         # Guard NaN/inf from corrupt JPEG → invalid feature extraction.
         # Non-finite inputs are substituted with neutral values (no contribution).
         va = visual_activity if math.isfinite(visual_activity) else 0.0
         vb = visual_brightness if math.isfinite(visual_brightness) else 0.5
         vw = visual_weights if visual_weights is not None else DEFAULT_VISUAL_WEIGHTS
         tension += va * vw.visual_activity + (1.0 - vb) * vw.visual_brightness
+    elif camera_ok is not True and (
+        visual_activity != 0.0 or visual_brightness != 0.5
+    ):
+        logger.debug(
+            "CAMERA-I6: visual inputs ignored (camera_ok=%r is not True — "
+            "no image data); visual_activity=%.4f, visual_brightness=%.4f",
+            camera_ok, visual_activity, visual_brightness,
+        )
 
     # Select thresholds — activation gate (ARD §5.4; resolved OPEN decision 2026-06-12).
     # Population defaults hold until ACTIVATION_THRESHOLD Welford samples guarantee a
