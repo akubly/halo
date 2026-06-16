@@ -99,3 +99,66 @@
 **Decision record:** `.squad/decisions/inbox/librarian-pr4-copilot-fixes.md`
 
 📌 Team update (2026-06-14T07:59:43Z): Phase-2 plan drafted (camera + cloud refinement) — pending Aaron approval. Decisions: Enzo (capability scope), Hiro (architecture). No code written. Affected: implementation lead (Ng), privacy review (Raven), docs (Librarian), testing (Juanita), infrastructure (Da5id).
+
+## Week 4 "It sees" — Visual Weight Extension + Option-C Cloud Sync (2026-06-14)
+
+**Branch:** `synesthetic-familiar/week4-it-sees`
+
+### What I built
+
+**1. Visual weight extension — `host/inference.py`**
+
+New module-level constants:
+- `_W_PITCH = 0.4`, `_W_ACCEL = 0.3`, `_W_ROT = 0.3` — Phase-1 weights extracted from inline to named constants. These are IMMUTABLE and never included in tunable state.
+- `VisualWeights(visual_activity=0.15, visual_brightness=0.05)` — Phase-2 additive camera weights.
+- `DEFAULT_VISUAL_WEIGHTS`, `MAX_VISUAL_WEIGHT_MULTIPLIER = 2.0`
+
+New functions: `load_visual_weights`, `save_visual_weights`, `reset_visual_weights`, `tune_visual_weights` (bounded EMA with divergence guard).
+
+Tension formula when `camera_ok=True`:
+```
+tension = pitch×0.4 + accel×0.3 + rot×0.3    ← Phase-1 (locked)
+        + visual_activity × W_va              ← additive camera term
+        + (1.0 − visual_brightness) × W_vb    ← dark → tense, bright → calm
+```
+
+**ADDITIVE INVARIANT proof:** the camera block is inside `if camera_ok:` — structurally unreachable when `camera_ok=False`. Phase-1 weights, threshold selection, mood classification, and confidence reductions are identical paths. Tests confirm this at 299 passing.
+
+**2. Bounded online weight tuning**
+
+`tune_visual_weights(current, target, alpha=0.1)`:
+- EMA: `new_w = (1−α) × current + α × target`
+- Hard clamp: `[0, DEFAULT × MAX_VISUAL_WEIGHT_MULTIPLIER]` — no weight ever exceeds 2× default
+- Divergence guard: `logger.warning` if any weight reaches ≥ 90% of bound
+- Pure function — caller is responsible for persisting via `save_visual_weights()`
+
+`reset_visual_weights()` → returns `VisualWeights()` (factory defaults, no side effects).
+
+Why EMA not SGD: Playground scope. EMA is transparent, bounded by construction (with clamp), and doesn't require a loss function. It smooths population suggestions toward local state over time. At alpha=0.1, 23 syncs are needed to reach 90% convergence from default.
+
+**3. `host/model_sync.py` — Option C federated sync**
+
+Key functions:
+- `download_weights(url, expected_hash)` → `bytes | None`: HTTPS download + SHA-256 verify. Returns `None` on hash mismatch. Raises `OSError`/`ValueError` on network errors / bad scheme.
+- `sync_population_weights(manifest, current, alpha)` → `VisualWeights`: fail-closed wrapper. Returns `current` unchanged on any error.
+- `apply_weight_update(update_dict)` → `dict`: apply an EMA update from a plain dict.
+- `reset_weights_to_defaults()` → `VisualWeights`: convenience alias.
+
+**No-egress proof (MODEL-I5):**
+The HTTP GET carries: `Host`, `User-Agent: Python-urllib/<version>`, `Accept-Encoding: identity`. Zero custom headers. Verified by inspection: `Request(url)` with no `add_header` calls. The server sees IP + standard User-Agent — no VESPER application-layer identifier of any kind.
+
+**4. Phase-1 invariant — proved structurally and tested**
+
+`camera_ok=False` → `if camera_ok:` block never executes → tension = Phase-1 formula only → identical threshold selection → identical classification → identical MoodResult. Test suite confirms with parametrized `TestAdditiveInvariant` covering stressed/calm/neutral/mic-only/IMU-only/both-fail paths.
+
+### File paths
+- `projects/synesthetic-familiar/host/inference.py` — visual weight extension, `compute_mood` updated
+- `projects/synesthetic-familiar/host/model_sync.py` — NEW: Option-C federated sync
+- Decision: `.squad/decisions/inbox/librarian-week4-inference-optionc.md`
+
+### Test result
+265 → 299 passed (34 new passing); 19 skipped (Ng's `_CameraRelay` — pending).
+
+---
+
+📌 Team update (2026-06-15T05:37:29Z): Week-4 camera SDK gate resolved BLOCKED (CAMERA-I3); Librarian shipped Option-C cloud sync (model_sync.py, VisualWeights, EMA tuning); Juanita delivered 53 new tests (296 passed, 22 skipped); Raven approved with 6 merge-blocking conditions. Phase-2 shipping cloud-refinement; camera deferred Phase-3 — decided by Ng, Librarian, Juanita, Raven

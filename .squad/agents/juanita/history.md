@@ -150,3 +150,58 @@ Document this as frame index N-1, not N.
 **265/265 passed** (0.40 s). No behavior change.
 
 📌 Team update (2026-06-14T07:59:43Z): Phase-2 plan drafted (camera + cloud refinement) — pending Aaron approval. Decisions: Enzo (capability scope), Hiro (architecture). No code written. Affected: implementation lead (Ng), privacy review (Raven), docs (Librarian), testing (Juanita), infrastructure (Da5id).
+
+---
+
+## 2026-06-14 — Week 4 "It sees" Acceptance Tests
+
+**Branch:** `synesthetic-familiar/week4-it-sees`
+### Suite result: 318 collected — 296 passed, 22 skipped, 0 failed.
+  (265 prior tests: all still green. 53 new tests: 31 active now, 22 pending implementers.)
+
+  **Note:** Librarian's `model_sync.py` had already landed with `download_weights`, `sync_population_weights`, and `tune_visual_weights`, so the MODEL-I5 privacy tests activated immediately and all passed against Librarian's implementation. Only Ng's camera/relay code is still pending (22 skipped).
+
+### Learnings
+
+#### Week-4 edge cases enumerated and covered
+All six §6 edge cases from the architecture draft now have test coverage:
+1. **camera_ok transitions False→True and True→False** — `TestCameraContribution` in test_week4_sensorframe_camera.py
+2. **BLE drop mid-JPEG reassembly** — `TestCameraRelayEdgeCases.test_mid_ble_transfer_drop_resets_reassembly`
+3. **Partial / corrupt JPEG** — `TestCameraRelayEdgeCases.test_partial_or_corrupt_jpeg_returns_defaults` (4 parametrized cases)
+4. **Camera present but all-dark** — `TestCameraContribution.test_all_dark_scene_does_not_crash`
+5. **Model download hash mismatch** — `TestModelSyncHashMismatch` (4 parametrized tamper strategies)
+6. **Model server unreachable → graceful local fallback** — `TestModelSyncServerUnreachable` (4 network error types)
+
+#### Additive-invariant test approach
+The core Week-4 gate is the **additive invariant**: camera_ok=False must produce EXACTLY Phase-1 behavior. Approach:
+- `TestAdditiveInvariant.test_camera_absent_matches_phase1_output` parametrizes 6 sensor combinations, calls compute_mood twice (with and without camera params), asserts identical mood/confidence/tension/gated.
+- `test_camera_ok_false_does_not_reduce_confidence_vs_phase1` is a separate regression guard against the "penalise camera absence" mistake.
+- Both skip cleanly (not xfail) until Librarian adds `camera_ok` to `compute_mood`; they activate automatically.
+
+#### Test file paths
+| File | Tests | Active now | Pending |
+|------|-------|-----------|---------|
+| `tests/test_week4_sensorframe_camera.py` | 20 | 13 | 7 (Ng's SensorFrame camera fields + Librarian's compute_mood visual params) |
+| `tests/test_week4_privacy_gates.py` | 12 | 4 | 8 (Ng's _CameraRelay + Librarian's model_sync) |
+| `tests/test_week4_camera_edge_cases.py` | 21 | 2 | 19 (Ng's _CameraRelay + Librarian's model_sync) |
+
+#### What's active now (19 tests)
+- CAMERA-I2: SensorFrame surface has no bytes/image fields or values (classicist, immediate)
+- Structural anchor: Phase-1 `compute_mood` still callable without camera params
+- Structural anchor: Baseline activation gate (sample_count >= 50) unchanged
+- Log-emission baseline: SensorFrame construction emits no JPEG bytes at INFO+
+- `test_camera_ok_false_default_means_all_sensorframes_are_phase1_compatible` (skips until Ng's fields land — activates automatically)
+
+#### What's pending and gates which PR
+- **Ng's PR** (sensors.py camera fields + `_CameraRelay`): gates 7 SensorFrame field tests + CAMERA-I1 buffer-zeroing tests + BLE relay edge cases (24 tests total)
+- **Librarian's PR** (compute_mood visual params + model_sync.py): gates additive-invariant tests + MODEL-I5 tests + online weight bounds tests (28 tests total; some overlap with Ng gate)
+
+#### Durable lessons
+- `pytest.skip` (not `xfail`) for "pending implementer code" — skips are silent and turn green automatically; xfail requires you to know they'll eventually pass and adds `.xpass` churn when they do.
+- Additive-invariant tests that compare Phase-1 and Phase-2 calls side-by-side are more reliable than trying to predict absolute values — they survive future heuristic tuning.
+- For MODEL-I5 request-privacy tests, intercepting `urllib.request.urlopen` and inspecting the Request object is the right seam — it catches both URL query params and custom headers without requiring a real HTTP server.
+- `_COMPUTE_MOOD_CAMERA_LANDED` detection via `inspect.signature()` is cleaner than try/except TypeError — it skips at the top of each test method rather than inside a try block.
+
+---
+
+📌 Team update (2026-06-15T05:37:29Z): Week-4 camera SDK gate resolved BLOCKED (CAMERA-I3); Librarian shipped Option-C cloud sync; Juanita delivered 53 new tests (296 passed, 22 skipped); Raven approved with 6 merge-blocking conditions. Phase-2 shipping cloud-refinement; camera deferred Phase-3 — decided by Ng, Librarian, Juanita, Raven

@@ -1,8 +1,8 @@
 ---
-updated_at: 2026-06-14T07:15:33Z
-focus_area: VESPER Week 3 "It's alive" — SHIPPED & MERGED (PR #4, squash e63de17). Local + cloud review cycles complete. Awaiting Phase-2 direction.
+updated_at: 2026-06-15T05:37:29Z
+focus_area: VESPER Week 4 "It sees" — cloud-refinement-only branch (synesthetic-familiar/week4-it-sees). Camera BLOCKED by CAMERA-I3 (SDK no LED control). 299 tests green. Option-C federated local refinement shipped. Ready for review-cycle → ship-to-pr.
 active_issues: []
-status: Week 3 "It's alive" SHIPPED & MERGED (PR #4, squash e63de17). 3 Copilot review cycles, 12 comments all addressed, 265 tests green. Awaiting Phase-2 milestone direction.
+status: Week 4 "It sees" BUILD COMPLETE. Camera SDK gate verdict: BLOCKED (no frame.led control). Cloud-refinement (Option-C: federated local model sync) shipped (model_sync.py + visual weights). 299 tests (265+34), 19 skipped. Privacy gates approved (6 conditions, 1 merge-blocking: BLE-I4 documentation). Ready for review → ship → cloud-review → merge. Phase-2 shipping cloud-refinement; camera deferred to Phase-3.
 ---
 
 # What We're Focused On

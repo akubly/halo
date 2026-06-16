@@ -48,3 +48,45 @@ Aaron approved all four persona-review findings for `device/main.lua`. Applied i
 **Phase-2 deferral:** Reset-epoch BLE-timing edge (LOW advisory from Skeptic).
 
 📌 Team update (2026-06-14T07:59:43Z): Phase-2 plan drafted (camera + cloud refinement) — pending Aaron approval. Decisions: Enzo (capability scope), Hiro (architecture). No code written. Affected: implementation lead (Ng), privacy review (Raven), docs (Librarian), testing (Juanita), infrastructure (Da5id).
+
+---
+
+## Week 4 "It Sees" — SDK Feasibility Gate (2026-06-14)
+
+### Verdict: ⛔ CAMERA BLOCKED — CAMERA-I3 (LED indicator unavailable)
+
+Full investigation complete. Week 4 camera scaffold NOT implemented. Phase-1 baseline: 265/265 tests passing, unchanged.
+
+### SDK Findings
+
+| Question | Answer |
+|----------|--------|
+| Triggered capture API? | **CONFIRMED** — `frame.camera.capture({quality="HIGH"})` + poll `frame.camera.image_ready()` + read with `frame.camera.read(mtu)` |
+| JPEG format/size? | 640px resolution only; quality configurable (VERY_HIGH/HIGH/MEDIUM/LOW/VERY_LOW); typical 10–50KB |
+| Recording-indicator LED (CAMERA-I3)? | **NOT AVAILABLE** — no `frame.led` or `frame.indicator` namespace in Halo SDK; white LED is firmware-managed (charging/pairing only); Lua cannot access it |
+| BLE throughput for 10–40KB JPEG? | ~1fps viable (MTU up to 512B, ~30–50KB/s practical); architecture-draft estimate of 2–4s was pessimistic for BLE 5.0 (moot given I3 block) |
+
+### CAMERA-I3 — Why It Blocks
+
+The complete Halo Lua API (System, Time, File, Button, Bluetooth, IMU, Compression, Speaker, Microphone, Display, Camera + libmpix) has **no LED control surface**. `frame.camera.capture()` does not auto-activate any visible indicator. Workarounds rejected: display flash ≠ hardware LED (doesn't satisfy Raven's requirement); firmware patch = custom firmware (Ng charter: "custom firmware never").
+
+### Bonus: On-Device Stats Path (Future Reference)
+
+`frame.camera.mpix.get_stats()` returns luminance histogram + per-channel RGB averages after any capture. This could produce `visual_brightness` and a `visual_activity` proxy **without transmitting JPEG over BLE at all** — eliminating CAMERA-I1/I2/I6 concerns. CAMERA-I3 still applies (capture must occur regardless). If a future SDK adds `frame.led.*`, this stats-only path becomes the cleanest implementation.
+
+### Week 4 Pivot
+
+Camera blocked → Week 4 is cloud-refinement-only (Option C federated local refinement). Librarian owns inference.py + model_sync.py. No Ng code changes required this week.
+
+**Decision file:** `.squad/decisions/inbox/ng-week4-camera-sdk.md`
+
+**Key file paths:**
+- Lua camera API: `docs.brilliant.xyz/halo/halo-sdk-lua/` §Camera + §Camera Image Processing (libmpix)
+- BLE specs: `docs.brilliant.xyz/halo/halo-sdk-bluetooth-specs/`
+- Phase-2 arch: `.squad/files/phase2-architecture-draft.md`
+- Host sensors: `projects/synesthetic-familiar/host/sensors.py`
+- Device Lua: `projects/synesthetic-familiar/device/main.lua`
+
+---
+
+📌 Team update (2026-06-15T05:37:29Z): Week-4 camera SDK gate resolved BLOCKED (CAMERA-I3); Librarian shipped Option-C cloud sync; Juanita delivered 53 new tests (299/319); Raven approved with 6 merge-blocking conditions. Phase-2 shipping cloud-refinement (model_sync.py); camera deferred Phase-3 — decided by Ng, Librarian, Juanita, Raven
