@@ -138,7 +138,12 @@ def load_visual_weights(path: Path = _VISUAL_WEIGHTS_PATH) -> VisualWeights:
             raise ValueError(
                 f"visual weight out of range: visual_activity={va!r}, visual_brightness={vb!r}"
             )
-        return VisualWeights(visual_activity=float(va), visual_brightness=float(vb))
+        _max_va = DEFAULT_VISUAL_WEIGHTS.visual_activity * MAX_VISUAL_WEIGHT_MULTIPLIER
+        _max_vb = DEFAULT_VISUAL_WEIGHTS.visual_brightness * MAX_VISUAL_WEIGHT_MULTIPLIER
+        return VisualWeights(
+            visual_activity=min(float(va), _max_va),
+            visual_brightness=min(float(vb), _max_vb),
+        )
     except (OSError, json.JSONDecodeError, TypeError, KeyError, ValueError) as exc:
         logger.warning(
             "[VisualWeights] failed to load from %s: %s — using defaults", path, exc
@@ -381,9 +386,10 @@ def compute_mood(
     ADDITIVE INVARIANT: camera_ok is not True returns EXACTLY the Phase-1 result.
     Proof: the camera block is inside `if camera_ok is True:` — it cannot execute
     unless camera_ok is the exact bool True.  Truthy-but-not-bool values (e.g. 1,
-    non-empty strings) are excluded by the strict identity check (CAMERA-I6).
-    The Phase-1 tension formula, threshold selection, mood classification, and
-    confidence reduction are all unchanged when camera_ok is not True.
+    non-empty strings) are excluded by the strict identity (additive-invariant /
+    modality) gate.  The Phase-1 tension formula, threshold selection, mood
+    classification, and confidence reduction are all unchanged when camera_ok is
+    not True.
 
     Threshold strategy:
         baseline=None or sample_count < ACTIVATION_THRESHOLD (calibrating)
@@ -417,7 +423,7 @@ def compute_mood(
     # ── Phase-2 camera augmentation (additive — only when camera available) ──
     # ADDITIVE INVARIANT: this block is unreachable when camera_ok is not True.
     # Strict identity check (is True) ensures truthy-but-not-bool values (e.g. 1,
-    # non-empty strings) do NOT accidentally unlock the camera path (CAMERA-I6).
+    # non-empty strings) do NOT accidentally unlock the camera path.
     if camera_ok is True:
         # Guard NaN/inf from corrupt JPEG → invalid feature extraction.
         # Non-finite inputs are substituted with neutral values (no contribution).
@@ -429,7 +435,7 @@ def compute_mood(
         visual_activity != 0.0 or visual_brightness != 0.5
     ):
         logger.debug(
-            "CAMERA-I6: visual inputs ignored (camera_ok=%r is not True — "
+            "camera modality gate: visual inputs ignored (camera_ok=%r is not True — "
             "no image data); visual_activity=%.4f, visual_brightness=%.4f",
             camera_ok, visual_activity, visual_brightness,
         )

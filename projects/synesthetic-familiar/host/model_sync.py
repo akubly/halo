@@ -395,6 +395,11 @@ def apply_weight_update(
         current  Base VisualWeights to blend FROM.  Callers own weight state
                  and pass their current weights here; the module keeps none.
 
+    Partial-update semantics: keys PRESENT in ``update`` are blended toward
+    their stated target via EMA.  Keys ABSENT from ``update`` are left
+    unchanged — the corresponding value from ``current`` is used as both
+    current and target, so no drift occurs.
+
     The ≤ 2× default bound is enforced via tune_visual_weights (no weight ever
     exceeds MAX_VISUAL_WEIGHT_MULTIPLIER × its default, regardless of input).
 
@@ -402,10 +407,10 @@ def apply_weight_update(
     """
     target = VisualWeights(
         visual_activity=float(
-            update.get("visual_activity", DEFAULT_VISUAL_WEIGHTS.visual_activity)
+            update.get("visual_activity", current.visual_activity)
         ),
         visual_brightness=float(
-            update.get("visual_brightness", DEFAULT_VISUAL_WEIGHTS.visual_brightness)
+            update.get("visual_brightness", current.visual_brightness)
         ),
     )
     result = tune_visual_weights(current, target, alpha=alpha)

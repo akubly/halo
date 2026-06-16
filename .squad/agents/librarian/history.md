@@ -176,3 +176,11 @@ The HTTP GET carries: `Host`, `User-Agent: Python-urllib/<version>`, `Accept-Enc
 **Dormant-sync documentation (I5 + I6):** The model_sync.py docstring now declares:
   - This sync capability is NOT yet wired into the runtime loop (ships Week 4, activates Phase 3 alongside camera — intentional).
   - Trust model: integrity rests on HTTPS + SHA-256; no host allowlist, cert pinning, or signed manifest; acceptable for single-user playground; hardening path = signed manifest + host pinning.
+
+## Learnings
+
+**On-load clamp gap (PR #5 Copilot fix):** `load_visual_weights()` validated that disk values were non-negative and finite, but did NOT enforce the ≤ 2× default upper bound stated in the docstring. A corrupted `~/.vesper/visual_weights.json` could load arbitrarily large values that `compute_mood` would then use unclamped. Fix: clamp on load — `min(float(v), DEFAULT × MAX_MULTIPLIER)` — consistent with the existing load-error handling (fall-safe to defaults on parse error; clamp silently for values in-range but over-bound). The load path must actually enforce the bound the docstring promises.
+
+**CAMERA-I6 mislabel lesson (PR #5 Copilot fix):** CAMERA-I6 is the "no image content in logs" privacy gate. Labeling the camera-modality additive-invariant gate (strict `is True` identity check) as "CAMERA-I6" in both the docstring and a debug log message was wrong — these are unrelated gates. Rule: do NOT reuse privacy-gate IDs for operational/architectural gates. Describe each gate accurately where it's used; don't borrow a nearby-sounding ID just because it was mentioned in the same feature spec section.
+
+**Omitted-keys = leave-unchanged semantics (PR #5 Copilot fix):** `apply_weight_update()` originally used DEFAULT values as the EMA target for any key absent from the update dict, causing unrelated weights to drift toward defaults on every partial update. Correct semantics: omitted keys mean "leave unchanged" — use the corresponding value from `current` as the target so no drift occurs. Only keys explicitly present in the update are blended toward their stated value. This is the standard partial-update contract for incremental tuning APIs.
