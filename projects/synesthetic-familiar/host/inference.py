@@ -436,7 +436,7 @@ def compute_mood(
     ):
         logger.debug(
             "camera modality gate: visual inputs ignored (camera_ok=%r is not True — "
-            "no image data); visual_activity=%.4f, visual_brightness=%.4f",
+            "no image data); visual_activity=%r, visual_brightness=%r",
             camera_ok, visual_activity, visual_brightness,
         )
 

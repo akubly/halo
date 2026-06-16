@@ -432,5 +432,26 @@ class TestUpdateBaselineHardened:
         assert math.isfinite(result.stddev)
 
 
+class TestCameraGateOffNonFloat:
+    """CAMERA-I6 guard: gate-off path must never raise on non-numeric visual inputs."""
+
+    def test_camera_off_string_visual_activity_does_not_raise(self) -> None:
+        """camera_ok=False with a string visual_activity must not raise and must
+        return the Phase-1 result (visual inputs ignored, additive-invariant)."""
+        result = compute_mood(
+            audio_rms=0.5,
+            audio_pitch_variance=0.5,
+            imu_acceleration=0.5,
+            imu_rotation=0.5,
+            camera_ok=False,
+            visual_activity="bad-value",  # non-float; should never crash
+        )
+        # Phase-1 tension = 0.5*0.4 + 0.5*0.3 + 0.5*0.3 = 0.50 → "neutral"
+        assert result.mood == "neutral", (
+            f"camera_ok=False must ignore visual_activity and return Phase-1 mood; "
+            f"got '{result.mood}'"
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

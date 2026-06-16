@@ -186,3 +186,5 @@ The HTTP GET carries: `Host`, `User-Agent: Python-urllib/<version>`, `Accept-Enc
 **Omitted-keys = leave-unchanged semantics (PR #5 Copilot fix):** `apply_weight_update()` originally used DEFAULT values as the EMA target for any key absent from the update dict, causing unrelated weights to drift toward defaults on every partial update. Correct semantics: omitted keys mean "leave unchanged" — use the corresponding value from `current` as the target so no drift occurs. Only keys explicitly present in the update are blended toward their stated value. This is the standard partial-update contract for incremental tuning APIs.
 
 **Docstring log-level accuracy (PR #5 Copilot re-review):** keep docstring log-level claims in sync with actual logger calls.
+
+**Gate-off/ignore paths must never raise on bad input (PR #5 Copilot re-review):** use non-throwing formatting (`%r`/`%s`) in diagnostic logs on any path whose whole purpose is to ignore an input — assume those inputs may be invalid types.
