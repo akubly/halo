@@ -211,3 +211,5 @@ Marked §6 Q1 as RESOLVED (Aaron chose include). Q2 (mood restoration) unchanged
 
 
 📌 Team update (2026-06-14T05:36:23Z): Y.T. wired activation gate (host bind-up complete); Ng shipped ATTENTION visuals with eye dilation (§6 Q1 INCLUDED); privacy audit APPROVED all surfaces — ready for ship sequence — decided by Y.T., Ng, Raven
+
+📌 Team update (2026-06-14T07:59:43Z): Phase-2 plan drafted (camera + cloud refinement) — pending Aaron approval. Decisions: Enzo (capability scope), Hiro (architecture). No code written. Affected: implementation lead (Ng), privacy review (Raven), docs (Librarian), testing (Juanita), infrastructure (Da5id).

@@ -1,68 +1,4 @@
 # Halo Decisions Log
-
-## 2026-06-07: Theme-2 Synesthetic Familiar as First Official Halo Project — ACCEPTED
-**Status:** ACCEPTED  
-**Owner:** Hiro (Architect), Aaron (final approval)  
-**Date:** 2026-06-07  
-**Scope:** Establishes Synesthetic Familiar (Theme-2) as first official Halo playground demo; locks architectural approach
-
-**Decision:** Synesthetic Familiar is the first official Halo playground project. Architecture follows host-peripheral model: Python host (mood inference from mic+IMU) → Lua device (render breathing sprite). 8 core architectural choices are locked:
-
-1. **Host-Peripheral Architecture Confirmed** — Python host drives inference; Lua device renders. No deviation from Brilliant's canonical model.
-
-2. **Autonomy Tier: Hybrid Host-Primary** — Host handles mood inference; device interpolates/renders locally. Device has IMU-only fallback if BLE drops. Latency budget 200-500ms achievable.
-
-3. **Mood/Render Decoupling** — Mood calculation = pure function `compute_mood(sensors) → { mood_enum, intensity, confidence }`. Rendering = pure Lua with no shared state. Enables future renderer swaps and independent unit testing.
-
-4. **Confidence Gating: Silence is Safer** — If mood confidence < 0.7, system holds current Familiar state rather than displaying uncertain values. Gate applied host-side before BLE transmission.
-
-5. **Privacy by Abstraction** — Familiar uses abstract visual language (breathing, color, orbit speed) with no labeled emotions, text, or explicit biometric indicators. Visual jitter (5-10%) prevents statistical inference. Satisfies lighter Theme-2 privacy requirements.
-
-6. **BLE Protocol: FAMILIAR_UPDATE (0x80)** — Custom opcode carrying mood_enum (1B), intensity (1B), confidence (1B), sequence (2B) = 6 bytes total in single BLE packet. No raw biometric data transmitted.
-
-7. **Display Budget: Within Constraints** — 24×24 sprite at 7 o'clock, 80% radius. Idle ~1.5% lit, calm ~3%, stressed ~2.5% — all well under 30% canvas limit.
-
-8. **Graceful Degradation Hierarchy** — Sensor failure fallback: (1) Mic+IMU → full inference; (2) Mic-only → 0.7 confidence cap; (3) IMU-only → 0.6 cap; (4) Both fail → hold 10s, then neutral. No freeze or error state.
-
-**Rationale:** Architecture aligns with decisions.md (hosted multimodal API, device portability, privacy-by-abstraction, M55 gate-keeping role). Hiro validated against LIBRARIAN-T2-5-ERROR, RAVEN-T2-1, and DASID-T2-1 user stories.
-
-**Deliverable:** `docs/projects/synesthetic-familiar/ARD.md`
-
----
-
-## 2026-06-07: Theme-2 Synesthetic Familiar — 3 Key Decisions Locked by Aaron
-**Status:** APPROVED  
-**Owner:** Hiro (Architect), Aaron (final decision)  
-**Date:** 2026-06-07  
-**Approval Date:** 2026-06-07  
-**Related:** Theme-2 Synesthetic Familiar ARD (2026-06-07)
-
-Aaron approved 3 critical architectural decisions for Synesthetic Familiar v1 (Theme-2 first official Halo playground project). These decisions are now LOCKED and drive the Week 1–3 milestone sequence.
-
-**Decision 1: Sensors for v1 — Mic + IMU (LOCKED)**
-- Mic + IMU provides good inference signal for stress/calm detection (voice tone + motion)
-- No camera in v1 eliminates privacy overhead and complexity
-- Rationale: Proven sufficient for v1 "feels alive" bar; camera deferred to Phase 2
-
-**Decision 2: Mood Model — Local Heuristic (LOCKED)**
-- Local heuristic on host (no cloud for v1)
-- Rationale: Latency (200-500ms local vs. 500-2000ms cloud) essential for ambient display; privacy (no telemetry); reliability (no network dependency)
-- Cloud refinement deferred to Phase 2
-
-**Decision 3: Creature Form — Abstract-with-Eyes (LOCKED)**
-- Abstract geometric form with single bright eye (no face, no anthropomorphic features)
-- Rationale: Recognizable as creature but abstract enough that bystanders cannot read wearer internal state; preserves privacy (RAVEN-T2-1)
-
-**Consequences:**
-- ARD now build-ready (status APPROVED in docs/projects/synesthetic-familiar/ARD.md)
-- Phase 1 milestone sequence locked: Week 1 "It moves" (render loop), Week 2 "It reacts" (host inference), Week 3 "It's alive" (UX + polish)
-- Tech stack finalized: Python 3.11 host + Lua device render + local heuristic (no cloud, no ML framework)
-- Privacy by abstraction confirmed (abstract visuals, no biometric leak, on-device inference)
-
-**Next Step:** Week 1 "It moves" — Python host harness + Lua sprite render on Halo device.
-
----
-
 ## 2026-06-08
 
 ### Testing Decision: London-School TDD for The Synesthetic Familiar
@@ -3403,4 +3339,692 @@ This is now internally consistent with the FakeClock timing section, the inline
 ```
 
 All 265 tests green. No behavior change confirmed.
+
+
+---
+
+# Decision: VESPER Phase 2 Capability Scope
+
+| Field | Value |
+|-------|-------|
+| **Author** | Enzo (Product / PM) |
+| **Date** | 2026-06-14 |
+| **Status** | PROPOSED — awaiting Aaron decision on OQ-1 through OQ-3 |
+| **Scope** | VESPER (Synesthetic Familiar) — Phase 2 milestone |
+| **Reference** | `.squad/files/phase2-prd-draft.md` |
+
+---
+
+## Decision
+
+Phase 2 milestone focus is **Capability Expansion: camera input + cloud refinement**, as selected by Aaron post-PR #4 merge.
+
+Both features were explicitly deferred from Phase 1 with documented rationale. Phase 1 proved the "alive" feeling core loop. Phase 2 deepens inference quality and longitudinal knowing.
+
+---
+
+## What's IN
+
+- Camera capture pipeline (host-local, visual features only — no raw frame storage)
+- Privacy indicator + consent UX for camera
+- Camera-augmented mood inference
+- Extended local baseline or opt-in cloud baseline sync (path TBD — OQ-2)
+- LESC BLE encryption (ARD §5.6 Phase 2 flag)
+- 48×48 sprite expansion (ARD §5.5 Phase 2 note)
+- CI cloud-import guard
+
+## What's PARKED
+
+- Peer-to-peer mood sharing
+- Community sprite upload
+- Cross-device roaming
+- Personality sliders / creature evolution (Week 7 stretch goal)
+
+## What's KILLED
+
+- Full cloud inference (raw features to cloud) — hard no
+- On-device ML (M55 NPU TFLite) — SDK not ready
+- Raw audio/video upload — direct contradiction of privacy promise
+- Web Bluetooth parity — wrong Phase 2 bet
+
+---
+
+## Privacy Gate — Hard Stop
+
+⛔ **Raven review is required before any camera or cloud implementation begins.**
+
+The following open questions must be resolved by Aaron + Raven before build starts:
+
+| OQ | Question | Stakes |
+|----|----------|--------|
+| OQ-1 | Camera: build or park? Which architecture option (A1/A2/A3)? | Recording indicator mandate; privacy overhead |
+| OQ-2 | Cloud refinement: which path (B1/B2/B3)? | Cloud egress vs. brand promise |
+| OQ-3 | Is VESPER still positioned as "no cloud"? | Brand differentiator vs. inference quality |
+
+**This decision record is parked until OQ-1 through OQ-3 are answered.**
+
+---
+
+## Rationale
+
+Phase 1's positioning ("no data leaves device") is a genuine competitive differentiator in a Gemini-heavy ecosystem. Camera and cloud are both high-value capabilities and high-risk to that positioning. The bet is not whether to add capability — it's whether we can add it without becoming the thing we aren't. That's Aaron's call, with Raven's input.
+
+---
+
+*Enzo — Product/PM | 2026-06-14*
+
+---
+
+# Decision: Phase 2 Capability Architecture — Camera Input + Cloud Refinement
+
+| Field | Value |
+|-------|-------|
+| **Date** | 2026-06-14 |
+| **Author** | Hiro (Architect) |
+| **Status** | DRAFT — awaiting Aaron review |
+| **Artifact** | `.squad/files/phase2-architecture-draft.md` |
+
+## Summary
+
+Phase-2 architecture proposal for adding camera input and cloud refinement to the Synesthetic Familiar (VESPER).
+
+### Camera Input
+- Camera enters as a **third modality** alongside mic + IMU, feeding into the existing mood heuristic on host
+- `SensorFrame` extended with 3 fields: `visual_activity`, `visual_brightness`, `camera_ok`
+- Camera capture on-device (Halo), JPEG relay to host via BLE, feature extraction on host, buffer zeroed
+- Recommended scope: **scene-level features only** (activity + brightness) — no face detection (Phase 3)
+- Wire format (`FAMILIAR_UPDATE` 6 bytes) unchanged — camera folds into mood heuristic on host side
+- Camera is additive: `camera_ok=False` is default/normal; creature never degrades vs Phase 1
+
+### Cloud Refinement
+- Three options evaluated: (A) opt-in cloud inference fallback, (B) periodic baseline sync, (C) federated local refinement
+- **Recommended: Option C** — no user data egress; population model weights pushed to host via standard update channel
+- Option B (baseline sync) is a natural opt-in extension for multi-device use (Phase 2.5)
+- Option A (cloud inference) rejected for Phase 2 — too much scope, latency issues, privacy egress
+
+### Privacy
+- Phase-1 "no raw egress" promise extended: no per-user data leaves host (Option C)
+- 5 new privacy constraints defined (CAMERA-I1 through MODEL-I5), 2 merge-blocking
+- Camera recording indicator (LED) is merge-blocking SDK gate
+- BLE LESC pairing promoted from deferred to gate (JPEG in transit is interceptable)
+- Egress point inventory mapped for all three options
+
+### Mono-Repo
+- Everything stays in `projects/synesthetic-familiar/` — no shared packages (three-copies rule: only one consumer)
+
+### Open Questions for Aaron
+- Q1: Camera scope — scene-level vs face detection
+- Q2: Cloud option — C (recommended) vs B vs A
+- Q3: BLE LESC — gate vs accept-and-document for playground
+- Q4: Camera frame rate target
+- Q5: Enzo PRD alignment on cloud-powered inference
+
+---
+
+
+# SDK Feasibility Decision — Week 4 Camera (Ng)
+
+| Field | Value |
+|-------|-------|
+| **Date** | 2026-06-14 |
+| **Author** | Ng (SDK Engineer) |
+| **Status** | FINAL |
+| **Verdict** | ⛔ CAMERA BLOCKED |
+| **Blocking condition** | CAMERA-I3 — no user-accessible LED control in Halo SDK |
+
+---
+
+## Verdict: CAMERA BLOCKED
+
+The Halo SDK **cannot satisfy Raven's CAMERA-I3 merge-blocking condition**. The hardware recording-indicator LED is not accessible from Lua scripts. Camera work stops here. Week 4 pivots to cloud-refinement-only (Option C federated local refinement, per Hiro's architecture draft §2.3).
+
+---
+
+## SDK Investigation — Full Findings
+
+### (a) Triggered Still Capture
+
+**CONFIRMED.** The Halo Lua API provides a complete async capture surface:
+
+```lua
+frame.camera.capture({quality="HIGH"})      -- async start; resolution fixed at 640px
+while not frame.camera.image_ready() do
+    frame.sleep(0.05)
+end
+local data = frame.camera.read(mtu)         -- returns nil when exhausted
+```
+
+Sources: `docs.brilliant.xyz/halo/halo-sdk-lua/` (Camera section), `docs.brilliant.xyz/halo/halo-sdk-bluetooth-specs/` (Camera section).
+
+### (b) JPEG Format / Size / Quality
+
+- **Resolution:** 640px only (no other option documented).
+- **Format:** JPEG output by default. Advanced `frame.camera.mpix` pipeline (libmpix) can produce QOI, palette, or raw Bayer, but JPEG is the default and standard path.
+- **Quality:** Configurable — `"VERY_HIGH"`, `"HIGH"`, `"MEDIUM"`, `"LOW"`, `"VERY_LOW"`.
+- **Typical size:** At `"MEDIUM"` quality for a 640×480 outdoor scene, expect 10–25KB; `"HIGH"` ~25–50KB.
+
+**Bonus finding:** `frame.camera.mpix.get_stats()` returns a luminance histogram (`y_histogram`, `y_histogram_vals`, `y_histogram_total`) and per-channel averages (`rgb_average_r/g/b`, `rgb_min/max_r/g/b`). This means scene-level features (`visual_brightness`, `visual_activity` proxy) could potentially be extracted **on-device from stats alone**, without transmitting the JPEG over BLE at all. This would eliminate CAMERA-I1/I2/I6 concerns entirely — but CAMERA-I3 still blocks because `capture()` must be called regardless, and the LED gate is about the capture cycle, not the data transfer.
+
+### (c) Recording-Indicator LED — CAMERA-I3 — BLOCKED ⛔
+
+**NOT AVAILABLE.** The complete Halo Lua API surface documented in `docs.brilliant.xyz/halo/halo-sdk-lua/` covers: System, Time, File System, Button, Bluetooth, IMU, Compression, Speaker, Microphone, Display, Camera (+ libmpix). There is **no `frame.led`, `frame.indicator`, or equivalent namespace**.
+
+The physical white LED on Halo's left arm is **firmware-managed only** — it indicates charging status and pairing mode. Lua scripts have zero access to it. `frame.camera.capture()` does not document auto-activating any visible recording indicator LED.
+
+Raven's CAMERA-I3 states: *"a hardware recording-indicator LED MUST be active during every capture cycle. If the Halo SDK CANNOT force the LED on during triggered capture, the camera feature is BLOCKED."*
+
+This condition **cannot be satisfied** with the current SDK. The gate fires.
+
+### (d) BLE Throughput — 1–2fps Feasibility
+
+**MARGINALLY VIABLE (moot given I3 block, documented for completeness):**
+
+- BLE LUA RX characteristic: max packet = negotiated MTU (up to 512 bytes), raw data payload = MTU − 4 bytes.
+- Camera image chunks are sent over regular LUA RX (no dedicated camera characteristic).
+- At MTU=512, practical sustained throughput in BLE 5.0 LE data-length-extension mode: ~30–50KB/s.
+- A 20KB JPEG at "LOW" quality: ~0.5s transfer → ~2fps achievable.
+- A 40KB JPEG at "HIGH" quality: ~1s transfer → ~1fps achievable.
+- Architecture draft estimate of "2–4s for a 30KB frame" is pessimistic for BLE 5.0; 1fps is realistic at MEDIUM quality.
+
+---
+
+## CAMERA-I3 — Why Workarounds Don't Apply
+
+Two workarounds were considered and rejected:
+
+1. **Use the display as a visual indicator** (flash a bright ring on the 256×256 OLED during capture): The display is the creature's face — a full-screen flash during capture would be highly disruptive to the creature's ambient rendering. More critically, Raven's condition specifies a **hardware** recording-indicator LED, not a software visual indicator. A display flash does not satisfy the privacy requirement (bystanders cannot see the tiny OLED from normal distances, whereas a physical LED can be seen from >1m).
+
+2. **Firmware customization to expose LED control**: The Halo firmware is open-source at `github.com/brilliantlabsAR/frame-2-firmware`. In principle, a firmware patch could expose `frame.led.set(bool)`. However: (a) firmware customization is out of scope for a playground demo, (b) it would break standard OTA updates, and (c) the task brief explicitly says "custom firmware never" (Ng charter).
+
+---
+
+## On-Device Stats Alternative (Future Reference)
+
+`frame.camera.mpix.get_stats()` after a capture call returns:
+- `y_histogram` — luminance histogram bins → directly maps to `visual_brightness`
+- `rgb_average_r/g/b` — per-channel averages → scene colorfulness proxy for `visual_activity`
+
+A future Phase-3 design could use **stats-only** mode: capture → read stats → discard JPEG entirely (never call `frame.camera.read()`). This would:
+- Eliminate JPEG transmission over BLE entirely (resolving BLE-I4 sniffer exposure)
+- Eliminate CAMERA-I1/I2/I6 concerns (no JPEG bytes on host side at all)
+- Provide the exact `visual_brightness` and a coarse `visual_activity` proxy natively
+
+**CAMERA-I3 would still apply** (capture still occurs; LED requirement is about the capture cycle, not data transfer). A firmware patch or future SDK update exposing LED control would unlock this path.
+
+---
+
+## Week 4 Pivot Recommendation
+
+Camera is blocked. Week 4 work:
+
+1. **Cloud refinement (Option C — federated local refinement)** — Librarian owns `inference.py` + `model_sync.py`. No Ng work required beyond confirming Phase-1 is unbroken.
+2. **Phase-1 regression** — 265/265 tests passing on `synesthetic-familiar/week4-it-sees` branch. No code changes made; camera scaffold NOT added.
+3. **Flag for future SDK watch** — If Brilliant Labs adds `frame.led.*` in a future firmware/SDK release, revisit CAMERA-I3. The stats-only path (`mpix.get_stats()`) is the cleanest forward option.
+
+---
+
+## Source Index
+
+| Claim | Source |
+|-------|--------|
+| `frame.camera.capture()` confirmed | `docs.brilliant.xyz/halo/halo-sdk-lua/` §Camera |
+| JPEG 640px, quality configurable | `docs.brilliant.xyz/halo/halo-sdk-lua/` §Camera |
+| `frame.camera.mpix.get_stats()` stats API | `docs.brilliant.xyz/halo/halo-sdk-lua/` §Camera Image Processing |
+| No `frame.led` API — complete Lua surface | `docs.brilliant.xyz/halo/halo-sdk-lua/` (full page reviewed) |
+| White LED = firmware-only (charging/pairing) | `docs.brilliant.xyz/halo/halo/` getting started page |
+| BLE MTU 512, LUA RX characteristic | `docs.brilliant.xyz/halo/halo-sdk-bluetooth-specs/` §BLE Services |
+| Camera images on LUA RX (no dedicated channel) | `docs.brilliant.xyz/halo/halo-sdk-bluetooth-specs/` §Camera |
+| Ng charter: "custom firmware never" | `.squad/agents/ng/` charter |
+
+
+# Librarian Week 4 — Visual Weight Extension + Option-C Cloud Sync
+
+| Field | Value |
+|-------|-------|
+| **Author** | Librarian (AI/ML) |
+| **Date** | 2026-06-14T00:48:14-07:00 |
+| **Branch** | `synesthetic-familiar/week4-it-sees` |
+| **Scope** | VESPER Phase 2, Week 4 "It sees" — inference-side deliverables |
+| **Raven gates satisfied** | MODEL-I5, CAMERA-I1 (egress proof), §6.1 weight bounds |
+
+---
+
+## 1. Decision Summary
+
+Implemented the inference-side Phase-2 additions:
+
+1. **Visual weight extension in `host/inference.py`** — camera features folded into `compute_mood` as additive terms, gated on `camera_ok`. Phase-1 additive invariant preserved structurally and verified by test.
+2. **Bounded online weight tuning** — EMA-based, ≤ 2× default bound, divergence guard, reset-to-defaults.
+3. **`host/model_sync.py`** — Option-C federated weight sync: HTTPS-only download, SHA-256 content hash verification, fail-closed, zero user data egress (MODEL-I5).
+
+---
+
+## 2. Tension Formula
+
+**Phase-1 (unchanged, locked per ARD §5.4):**
+```
+tension = audio_pitch_variance × 0.4 + imu_acceleration × 0.3 + imu_rotation × 0.3
+```
+
+**Phase-2 augmentation (additive, only when `camera_ok=True`):**
+```
+tension += visual_activity × W_va  +  (1.0 − visual_brightness) × W_vb
+```
+
+Default values: `W_va = 0.15`, `W_vb = 0.05`.
+
+Rationale for formula:
+- `visual_activity × W_va`: high scene movement (0–1) → alert/stressed → positive contribution to tension.
+- `(1 − visual_brightness) × W_vb`: dark environment → tense, bright environment → calm → dark adds tension.
+- Both inputs are [0, 1] with positive weights → arithmetic is clean and bounded.
+- Maximum camera additive contribution at defaults: `1.0×0.15 + 1.0×0.05 = 0.20`.
+
+**Why not rescale Phase-1 weights?** Phase-1 weights are LOCKED per ARD §5.4. Rescaling them would break the activation gate math and the locked specification. Camera is strictly additive, not a replacement.
+
+---
+
+## 3. ADDITIVE INVARIANT — Proof
+
+> **Claim:** `compute_mood(..., camera_ok=False, ...)` returns EXACTLY the same `MoodResult` as a Phase-1 call with identical audio/IMU inputs.
+
+**Structural proof:**
+```python
+# Phase-1 tension (always computed)
+tension = audio_pitch_variance * _W_PITCH + imu_acceleration * _W_ACCEL + imu_rotation * _W_ROT
+
+# Camera augmentation — ONLY entered when camera_ok=True
+if camera_ok:
+    tension += ...  # unreachable when camera_ok=False
+```
+
+When `camera_ok=False`, the `if camera_ok:` block is never entered. The tension value, threshold selection, mood classification, and confidence reductions are byte-for-byte identical to the Phase-1 code path. `camera_ok=False` is the default — camera absence is never penalised.
+
+**Test coverage:** `TestAdditiveInvariant` in `test_week4_sensorframe_camera.py` verifies all five field of `MoodResult` (mood, mood_int, confidence, gated, tension) across 6 parametrized cases (stressed, calm, neutral, mic-only, IMU-only, both-sensors-missing).
+
+---
+
+## 4. Bounded Online Weight Tuning
+
+**Algorithm:** Exponential Moving Average (EMA).
+
+```
+new_weight = (1 − α) × current_weight + α × target_weight
+```
+
+With `α = 0.1` (default), 23 sync iterations are needed to reach 90% convergence from any starting point toward a stable target.
+
+**Why EMA, not SGD or gradient methods:**
+- Playground scope — no loss function, no labeled ground truth.
+- EMA is transparent, monotonically damped, and resistant to single-outlier spikes.
+- The hard clamp (`max(0, min(weight, DEFAULT × 2))`) enforces the ≤ 2× bound regardless of alpha or target value. SGD would require learning rate tuning to achieve the same bound guarantee.
+
+**Bound enforcement (Hiro §6.1 risk mitigation):**
+```python
+max_va = DEFAULT_VISUAL_WEIGHTS.visual_activity * MAX_VISUAL_WEIGHT_MULTIPLIER  # 0.30
+max_vb = DEFAULT_VISUAL_WEIGHTS.visual_brightness * MAX_VISUAL_WEIGHT_MULTIPLIER  # 0.10
+
+new_va = max(0.0, min(new_va, max_va))
+new_vb = max(0.0, min(new_vb, max_vb))
+```
+
+**Divergence guard:** If any weight reaches ≥ 90% of its bound after an EMA step, a `logger.warning` is emitted. The caller can then call `reset_visual_weights()` to restore defaults.
+
+**Reset:** `reset_visual_weights()` (inference.py) and `reset_weights_to_defaults()` (model_sync.py) return `VisualWeights()` — factory defaults, no disk I/O. Caller saves if desired.
+
+---
+
+## 5. Option-C Federated Design — No-Egress Proof
+
+**What is downloaded:**
+A static JSON file from a known HTTPS URL (e.g., a GitHub release asset):
+```json
+{"version": "1", "visual_activity": 0.15, "visual_brightness": 0.05}
+```
+This is a population-aggregate weight suggestion. It does not encode per-user data. It is functionally equivalent to a software update.
+
+**What stays local (never leaves host):**
+| Data | Location | Egress? |
+|------|----------|---------|
+| `baseline.json` (Welford mean/stddev) | `~/.vesper/` | ❌ Never |
+| `visual_weights.json` (tuned visual weights) | `~/.vesper/` | ❌ Never |
+| Raw audio, IMU features | Host memory | ❌ Never |
+| Visual features (visual_activity, visual_brightness) | Host memory | ❌ Never |
+| MoodResult values | Host/BLE wire | ❌ Never to cloud |
+
+**The sync HTTP request (annotated):**
+```
+GET /population_weights.json HTTP/1.1
+Host: update-server.example.com          ← server hostname only
+User-Agent: Python-urllib/3.12           ← stdlib default, not a VESPER id
+Accept-Encoding: identity
+
+[No body, no custom headers, no cookies, no session tokens]
+```
+
+**Absent from the request (MODEL-I5):**
+- ❌ User ID — not generated or stored in this codebase
+- ❌ Device ID — not generated or stored in this codebase
+- ❌ Baseline stats (mean, stddev, sample_count) — not included
+- ❌ Session token — not generated or stored
+- ❌ Custom headers — `Request(url)` with no `add_header()` calls (verified by inspection)
+
+The server operator sees: IP address (inherent to TCP) + stdlib User-Agent. Both are standard for any HTTPS fetch and are not VESPER application-layer identifiers. This satisfies Raven's MODEL-I5 gate (§4.2).
+
+**Integrity verification:** SHA-256 of the downloaded file is compared to `PopulationManifest.sha256` before any weights are used. On mismatch: download is discarded, `current` weights are returned unchanged (fail-closed).
+
+**Offline capability:** If the server is unreachable (OSError, TimeoutError, or any network exception), `sync_population_weights` returns `current` unchanged. The creature runs normally on local weights.
+
+---
+
+## 6. Files Changed
+
+| File | Change |
+|------|--------|
+| `host/inference.py` | Added `VisualWeights`, `DEFAULT_VISUAL_WEIGHTS`, weight constants; `load/save/reset/tune_visual_weights`; updated `compute_mood` signature + camera branch |
+| `host/model_sync.py` | **NEW** — `download_weights`, `sync_population_weights`, `apply_weight_update`, `reset_weights_to_defaults`, `get_current_weights`, `PopulationManifest`, `DEFAULT_MANIFEST` |
+
+---
+
+## 7. Test Result
+
+| Metric | Before | After |
+|--------|--------|-------|
+| Passing | 265 | 299 |
+| Skipped | 20 | 19 |
+| Failed | 0 | 0 |
+
+The 19 remaining skips are all in Ng's `_CameraRelay` / `SensorFrame` extension — expected, pending Ng's Week 4 delivery.
+
+---
+
+*Librarian — AI/ML | VESPER Phase 2 Week 4 | 2026-06-14T00:48:14-07:00*
+
+
+# Decision: Juanita Week-4 "It sees" Test Suite
+
+| Field | Value |
+|-------|-------|
+| **Author** | Juanita (Tester / QA) |
+| **Date** | 2026-06-14 |
+| **Branch** | `synesthetic-familiar/week4-it-sees` |
+| **Status** | PROPOSED — pending team review |
+| **Supersedes** | juanita-week3-fallback.md (extends, does not replace) |
+
+---
+
+## Context
+
+Week 4 of Phase 2 ("It sees") introduces camera input and cloud model sync.
+The plan is LOCKED and Raven-gated.  I wrote acceptance tests in parallel with
+Ng (sensors.py) and Librarian (inference.py / model_sync.py), working solely
+from the locked contract without waiting for their code.
+
+---
+
+## Decision: Test Structure for Week 4
+
+### Three test files, clear ownership
+
+| File | Contract being tested | Gates whose PR |
+|------|-----------------------|----------------|
+| `test_week4_sensorframe_camera.py` | SensorFrame 3-field extension + additive invariant + camera inference behavior | Ng (field types/defaults) + Librarian (compute_mood visual params) |
+| `test_week4_privacy_gates.py` | CAMERA-I2, CAMERA-I1, CAMERA-I6, MODEL-I5 | Ng (_CameraRelay zeroing) + Librarian (model_sync privacy) |
+| `test_week4_camera_edge_cases.py` | Hash mismatch, server unreachable, partial JPEG, BLE mid-drop, weight bounds | Ng (_CameraRelay) + Librarian (model_sync) |
+
+### Skip-not-xfail for pending code
+
+Tests for code that hasn't landed yet use `pytest.skip`, not `pytest.mark.xfail`.
+Rationale:
+- `xfail` implies I know the test will fail AND eventually pass — I can't guarantee that without seeing the implementation.
+- `skip` is honest: "not testable yet, activate when the API exists."
+- Skip-to-active is automatic: the `_CAMERA_FIELDS_LANDED` / `_COMPUTE_MOOD_CAMERA_LANDED` / `_CAMERA_RELAY_AVAILABLE` / `_MODEL_SYNC_AVAILABLE` flags are computed at import time from `inspect.signature()` and `hasattr()`, so no manual re-enabling is ever needed.
+
+### Additive-invariant test approach
+
+The single most important gate is: `camera_ok=False` → exact Phase-1 behavior.
+
+Approach chosen: **side-by-side comparison** of Phase-1 and Phase-2 calls rather than asserting absolute values.
+- This is resilient to future heuristic tuning (thresholds, weights) — the invariant holds regardless of what the exact numbers are.
+- Parametrized over 6 sensor combinations (stressed, calm, neutral, mic-only, IMU-only, both-missing) to catch any camera-ok interaction with the sensor-failure confidence reduction path.
+- Separate regression guard `test_camera_ok_false_does_not_reduce_confidence_vs_phase1` catches the "penalise camera absence" mistake directly.
+
+### Current suite counts
+
+- **318 collected** — 296 passed, 22 skipped, 0 failed.
+- 265 existing tests: all still green (zero regression).
+- 53 new tests: 31 active now (including all MODEL-I5 tests — Librarian's model_sync.py already landed), 22 pending Ng's camera/relay code.
+
+---
+
+## Raven Privacy Gate Coverage
+
+All four Raven conditions have at least one active-now structural test plus
+one or more skip-pending tests that will activate once the implementation lands:
+
+| Raven condition | Active-now coverage | Pending coverage |
+|----------------|---------------------|-----------------|
+| CAMERA-I1 (buffer zeroed) | Module docstring check (active once relay lands) | `TestCameraI1_BufferZeroed.test_camera_relay_zeros_buffer_after_extraction` |
+| CAMERA-I2 (floats only on public surface) | 3 tests active now on Phase-1 SensorFrame; 1 more activates with Ng's fields | `test_sensorframe_camera_fields_are_float_typed_when_present` |
+| CAMERA-I6 (no JPEG in INFO+ logs) | `test_sensorframe_construction_emits_no_image_bytes_in_logs` (active now) | `test_camera_relay_extraction_logs_no_pixel_data` |
+| MODEL-I5 (no user data in request; hash verify) | — | 4 tests (all pending Librarian's model_sync.py) |
+
+---
+
+## What Each Implementer's PR Must Pass to Merge
+
+**Ng's PR** (sensors.py camera fields + `_CameraRelay`):
+- All 7 `TestSensorFrameCameraFields` tests
+- All 2 `TestCameraI1_BufferZeroed` tests
+- All 4 `TestCameraI2` camera-field tests
+- `TestCameraRelayEdgeCases` (5 parametrized + 1 BLE-drop test)
+- `TestCameraI6.test_camera_relay_extraction_logs_no_pixel_data`
+
+**Librarian's PR** (compute_mood visual params + model_sync.py):
+- All 7 `TestAdditiveInvariant` tests (6 parametrized + 1 regression guard)
+- All 5 `TestCameraContribution` tests
+- All 4 `TestModelI5_ModelSyncPrivacy` tests
+- All `TestModelSyncHashMismatch` tests (5 parametrized + 1 state-isolation)
+- All `TestModelSyncServerUnreachable` tests
+- `TestOnlineWeightBounds` (2 tests)
+
+---
+
+## Risks Accepted
+
+1. **_CameraRelay API naming is unknown.** Tests probe `_receive_jpeg()` and `_extract_visual_features()` as the most natural names. If Ng chooses different names, the tests will skip with a clear message explaining what to update.
+2. **model_sync.py function signatures are unknown.** Tests probe `download_weights(url, expected_hash)`, `get_weights_with_fallback()`, `get_current_weights()`, `apply_weight_update()`, `reset_weights_to_defaults()`. If Librarian uses different names, the tests skip with guidance.
+3. **Hash algorithm assumed to be SHA-256.** This matches the `hashlib.sha256` convention in the Phase-1 codebase and the architecture draft's "content-hash" language. If SHA-512 is used, update the test helpers.
+
+
+# Raven — Phase 2 Privacy Gate Decision
+
+| Field | Value |
+|-------|-------|
+| **Reviewer** | Raven (Security & Privacy) |
+| **Date** | 2026-06-14T00:48:14-07:00 |
+| **Scope** | VESPER Phase 2: Camera Input + Cloud Refinement (locked direction) |
+| **Requested by** | Aaron Kubly |
+| **Verdict** | ✅ **APPROVE-WITH-CONDITIONS** |
+
+---
+
+## 1. Phase-2 Data-Flow Diagram (≤5 boxes)
+
+```
+┌──────────────────────────────┐
+│  [1] Halo Camera (on-device) │  forward-facing, outward
+│  frame.camera.capture()      │  JPEG at 1–2 fps
+│  LED indicator active        │
+└────────────┬─────────────────┘
+             │ Raw JPEG over BLE (unencrypted, local RF)
+             │ ⚠ E-1: sniffer threat within ~10m
+             ▼
+┌──────────────────────────────────────────────────────┐
+│  [2] Host: sensors.py _CameraRelay                   │
+│  JPEG reassembly → decode → extract features         │
+│  visual_activity (0.0–1.0), visual_brightness (0.0–1.0) │
+│  JPEG buffer zeroed in-place immediately after        │
+│  ✅ E-2: in-memory only, no persist, no cloud        │
+└──────────────────┬───────────────────────────────────┘
+                   │ (visual_activity, visual_brightness) — floats only
+                   ▼
+┌──────────────────────────────────────────────────────┐
+│  [3] Host: inference.py compute_mood                  │
+│  audio + IMU + visual → MoodResult                   │
+│  online weight tuning stays local                    │
+└──────────────────┬───────────────────────────────────┘
+                   │ mood_enum + intensity + confidence + seq (6 bytes)
+                   │ UNCHANGED wire format
+                   ▼
+┌──────────────────────────────┐
+│  [4] Device (Halo, Lua)      │
+│  sprite render — unchanged   │
+└──────────────────────────────┘
+
+       ┌────────────────────────────────────┐
+       │  [5] Update Server (HTTPS, GET)    │
+       │  population model weights JSON     │
+       │  ← download only; no user data     │  ✅ E-3
+       └────────────────────────────────────┘
+         (static GitHub release asset or equivalent)
+```
+
+**Five boxes. Every sensor-derived data movement marked.**
+
+---
+
+## 2. Egress / Exposure Point Analysis
+
+### E-1 — Raw JPEG over unencrypted BLE (Camera → Host)
+
+| Dimension | Assessment |
+|-----------|------------|
+| **Data** | Raw JPEG, 10–40KB, scene image from outward-facing camera. May contain faces of unconsenting third parties. |
+| **Who can see it** | Any BLE scanner within ~10m. No authentication, no encryption, no pairing barrier. |
+| **Retention** | In-flight only. Never written to host disk. Zeroed after extraction (see E-2). |
+| **Mitigation** | LESC (P2-1) deferred per locked direction. Accepted as "playground demo, no BLE confidentiality guarantee" with explicit documentation (see gate condition BLE-I4). |
+| **Raven ruling** | **ACCEPTED** — under strict documentation requirement. The Halo camera is outward-facing; the JPEG is a scene image, not a biometric selfie. The primary risk is third-party (bystander) faces captured in the frame. This must be named in all user-facing documentation, not just called a "wearer risk." |
+
+### E-2 — Feature extraction buffer (host memory)
+
+| Dimension | Assessment |
+|-----------|------------|
+| **Data** | Decoded JPEG bytes in Python memory. |
+| **Who can see it** | Host process only. No transmission. |
+| **Retention** | Zeroed immediately after feature extraction (CAMERA-I1). |
+| **Mitigation** | Same pattern as mic I7 gate (approved Phase 1). In-place buffer zeroing required — `buffer[:] = 0`, not `del buffer`. `del` is not a security primitive (see history Learning #1). |
+| **Raven ruling** | **CLEAN** — CAMERA-I1 governs this. Pattern proven. |
+
+### E-3 — Population model download (HTTPS, cloud → host)
+
+| Dimension | Assessment |
+|-----------|------------|
+| **Data** | HTTP GET request for model weights JSON. No user data in request. |
+| **Who can see it** | Update server operator sees IP address and User-Agent. No biometric data. No user identifier. |
+| **Retention** | Weights stored locally as JSON file. |
+| **Mitigation** | HTTPS only. Content hash or signature verified post-download. No user ID, device ID, baseline stats, or identifying custom headers in the request. Serving as static GitHub release asset is the lowest-risk form. |
+| **Raven ruling** | **CLEAN** — under MODEL-I5 gate conditions. Functionally equivalent to a software update. |
+
+---
+
+## 3. Merge-Blocking Constraints — Confirmation and Additions
+
+### CAMERA-I1 (Hiro) — CONFIRMED AND REINFORCED
+
+**Verdict: CONFIRMED MERGE-BLOCKING.**
+
+Raw JPEG buffer MUST be zeroed immediately after visual feature extraction. No raw image data persists beyond the extraction call. No image data written to disk or transmitted to cloud.
+
+**Additional enforcement (Raven adds):** Zeroing MUST use in-place assignment (`buffer[:] = 0` or equivalent) on the decoded byte array, not solely `del buffer`. `del` is reference deletion, not memory erasure. Same standard as mic I7 gate. The `finally` block pattern from `_extract_frame` in sensors.py is the required implementation pattern.
+
+### CAMERA-I2 (Hiro) — CONFIRMED AND REINFORCED
+
+**Verdict: CONFIRMED MERGE-BLOCKING.**
+
+`SensorFrame` exposes only `visual_activity: float` and `visual_brightness: float`. No raw pixel arrays, no JPEG bytes, no decoded image objects appear on any public API, test fixture, or log output (see CAMERA-I6 below).
+
+**Additional enforcement:** This constraint is a contract boundary equivalent to the `SensorFrame` mic boundary (mic I7). Any code review finding JPEG bytes, numpy image arrays, or PIL/cv2 Image objects on the `SensorFrame` or `_CameraRelay` public surface is a merge blocker.
+
+### CAMERA-I3 (Hiro) — REQUIRED. POSITION STATED.
+
+**Verdict: CONFIRMED MERGE-BLOCKING. Raven upholds Hiro's call.**
+
+A hardware recording indicator (LED) MUST be active on the Halo device during every camera capture cycle. This is not optional for the playground.
+
+**Rationale:**
+
+The Halo camera is outward-facing. At 1–2fps, the JPEG captures the scene in front of the wearer. This scene may contain:
+- Faces of people who have not consented to being photographed
+- Private spaces (homes, medical facilities, confidential meetings)
+- Content the wearer cannot even see (camera field of view ≠ wearer field of vision)
+
+There is no other mechanism by which a third party can know capture is occurring. The LED is the only bystander signal. Its absence means unconsented capture of potentially identifiable third parties with no visible indicator — this fails basic bystander-consent norms regardless of whether the captured content is "only" used for scene-level features.
+
+The fact that face detection is locked OFF does not eliminate this exposure: the raw JPEG exists during the Halo → host BLE transit, and that JPEG contains the scene image in full resolution.
+
+**If the Halo SDK (`frame.camera.capture()`) cannot activate the LED independently or contemporaneously with capture: camera feature is BLOCKED.** No exceptions for playground scope.
+
+---
+
+## 4. Additional Gate Conditions (Raven's own requirements)
+
+### BLE-I4 — Unencrypted BLE JPEG documentation (GATE CONDITION, required before merge)
+
+The README, any user-facing `--help` output, and the project's privacy notice MUST contain a visible warning:
+
+> **Camera BLE relay:** Raw scene JPEG is transmitted over unencrypted BLE. Any Bluetooth scanner within approximately 10 metres may capture scene images during use. This is a playground demo — there is no BLE confidentiality guarantee. Captured images may contain images of bystanders and third parties.
+
+**The warning must name the third-party risk specifically.** Framing it as a wearer-only risk is insufficient — the primary exposure is bystanders, not the wearer.
+
+LESC (P2-1) remains on the carry-forward list for Phase 3. Its deferral from Phase 2 is accepted under the playground scope, with the above documentation as the compensating control.
+
+### MODEL-I5 — Population model download integrity (GATE CONDITION, required before merge)
+
+1. Download MUST use HTTPS only. No HTTP fallback.
+2. The HTTP request MUST NOT include: user ID, device ID, baseline statistics, session token, or custom headers that could fingerprint the requester beyond standard HTTP.
+3. The downloaded model file MUST have its content hash verified before application (SHA-256 of expected file embedded in code or fetched from a signed manifest). If hash fails, the download is discarded and local defaults are retained.
+4. Serving the model as a static GitHub release asset is the recommended implementation — it is public, auditable, and carries no user-tracking.
+
+### CAMERA-I6 — No frame content in logs (NEW, MERGE-BLOCKING)
+
+The host-side JPEG decode and feature-extraction path MUST NOT log, write, or expose JPEG bytes, frame dimensions, pixel values, or decoded image objects at any log level in normal operation. Debug-level logging of extracted feature floats (`visual_activity`, `visual_brightness`) is acceptable. Any log statement that would emit image content, frame size in pixels, or raw byte counts derived from image data is a merge blocker.
+
+---
+
+## 5. Verdict
+
+### ✅ APPROVE-WITH-CONDITIONS
+
+The locked Phase-2 direction preserves the core Phase-1 privacy promise for cloud refinement (Option C: no per-user data egress). The camera path introduces one genuine threat vector — raw JPEG over unencrypted BLE — which Aaron has explicitly accepted with documentation. I accept this decision for the playground scope with the conditions enumerated below.
+
+**The "no raw biometric egress" brand promise is NOT violated by this direction**, provided the conditions are met. The wire format is unchanged. The cloud path is download-only. The camera exposes a scene-level threat (BLE sniffing of JPEG) that is real, documented, and acceptable only because:
+
+1. The camera is outward-facing (not a biometric selfie camera)
+2. Extraction produces only two floats (activity, brightness) — not face vectors
+3. The raw buffer is zeroed before any other operation
+4. The LED indicator gates capture (CAMERA-I3)
+5. Documentation names the bystander risk explicitly
+
+**If any numbered condition below is not met at merge time, the camera feature does not ship.**
+
+---
+
+## Gate Conditions (numbered for tracking)
+
+| # | ID | Condition | Blocking level |
+|---|-----|-----------|---------------|
+| 1 | CAMERA-I1 | Raw JPEG buffer zeroed in-place (`buffer[:] = 0`) immediately after feature extraction, in a `finally` block. Never written to disk. Never transmitted to cloud. | 🔴 MERGE-BLOCKING |
+| 2 | CAMERA-I2 | `SensorFrame` public API contains only `visual_activity: float` and `visual_brightness: float`. No JPEG bytes, pixel arrays, or image objects on any public surface. | 🔴 MERGE-BLOCKING |
+| 3 | CAMERA-I3 | Halo LED indicator is active during every camera capture cycle. If the SDK cannot satisfy this, camera feature is blocked. | 🔴 MERGE-BLOCKING |
+| 4 | CAMERA-I6 | Host-side JPEG/decode path emits no image content, raw byte counts, or frame dimensions at any non-debug log level. | 🔴 MERGE-BLOCKING |
+| 5 | BLE-I4 | README and `--help` carry a visible warning naming the unencrypted BLE sniffer risk and explicitly calling out the bystander/third-party risk (not just wearer risk). | 🔴 MERGE-BLOCKING |
+| 6 | MODEL-I5 | Population model download uses HTTPS only. No user-identifying data in the request. Content hash verified before application. | 🔴 MERGE-BLOCKING |
+
+**LESC (P2-1) deferred to Phase 3. Accepted for playground scope under condition 5 (documentation).**
+
+---
+
+*Raven — Security & Privacy | VESPER Phase 2 Privacy Gate | 2026-06-14T00:48:14-07:00*
+
+
 

@@ -54,6 +54,35 @@
 - Audit verdict filed: `.squad/decisions/inbox/raven-week3-audit.md`
 - New deferred item added: **P2-4** (stdout mean/stddev print, owner Y.T.)
 
+### Phase 6: Phase 2 Privacy Gate (2026-06-14T00:48:14-07:00)
+
+**Verdict: APPROVE-WITH-CONDITIONS**
+
+Reviewed locked Phase-2 direction (camera scene-level features + Option C cloud refinement). Produced formal gate decision in `.squad/decisions/inbox/raven-phase2-privacy-gate.md`.
+
+**Data-flow summary (5 boxes):**
+Halo Camera → [JPEG, unencrypted BLE] → Host _CameraRelay (extract + zero) → inference.py (local only) → Device (unchanged wire). Update server → [HTTPS download only] → model_sync.py.
+
+**Threat analysis — key findings:**
+- **E-1 (BLE JPEG):** Real sniffer threat (~10m). LESC deferred/accepted for playground. PRIMARY RISK IS BYSTANDERS, not wearer — Halo camera is outward-facing; JPEG may contain faces of unconsenting third parties. Documentation must name this explicitly.
+- **E-2 (host memory buffer):** Clean. Same in-place zero pattern as mic I7. No new threat.
+- **E-3 (model download):** Clean. Download-only, no user data in request. Functionally a software update.
+
+**Gate conditions issued (all merge-blocking):**
+1. **CAMERA-I1** (CONFIRMED): In-place JPEG buffer zero (`buffer[:] = 0`) in `finally` block. `del` alone is insufficient — same learning as mic audit.
+2. **CAMERA-I2** (CONFIRMED): `SensorFrame` public API: floats only. No JPEG bytes, pixel arrays, or image objects.
+3. **CAMERA-I3** (UPHELD): LED recording indicator REQUIRED during every capture cycle. If SDK can't, camera is blocked. Rationale: outward camera + no other bystander signal = unconsented capture of third parties.
+4. **CAMERA-I6** (NEW): No frame content, raw byte counts, or frame dimensions in logs at any non-debug level.
+5. **BLE-I4** (NEW): README/help must name the BLE sniffer risk AND the bystander/third-party risk explicitly.
+6. **MODEL-I5** (CONFIRMED): HTTPS only, no user-identifying data in request, content hash verified.
+
+**Key learnings:**
+- Outward-facing cameras have a fundamentally different threat model than selfie cameras: the primary privacy risk is bystander exposure, not wearer biometrics. Threat model must name this separately.
+- "Playground scope" does not waive the LED indicator requirement for outward-facing cameras — the bystander consent argument is independent of production/demo status.
+- BLE egress documentation must distinguish wearer risk from third-party risk. Conflating them understates the actual exposure.
+- Option C (federated, no user egress) is the cleanest cloud path available — preserves Phase-1 brand promise in full.
+- P2-1 (LESC) carry-forward to Phase 3 remains appropriate; the camera JPEG exposure makes it more urgent, not optional.
+
 ## Full Session History
 
 Archived in `.squad/agents/raven/history-archive-detailed.md` (detailed threat inventory, ideation passes, story mappings, Week 1 & 2 audit narratives).
@@ -61,3 +90,9 @@ Archived in `.squad/agents/raven/history-archive-detailed.md` (detailed threat i
 
 
 📌 Team update (2026-06-14T05:36:23Z): Da5id eye dilation INCLUDED (§6 Q1); host bind-up + onboarding complete (Y.T.); ATTENTION visuals shipped (Ng); 262 tests green (Juanita); docs synced (Librarian) — all surfaces APPROVED, ship ready — decided by Da5id, Y.T., Ng, Juanita, Librarian
+
+📌 Team update (2026-06-14T07:59:43Z): Phase-2 plan drafted (camera + cloud refinement) — pending Aaron approval. Decisions: Enzo (capability scope), Hiro (architecture). No code written. Affected: implementation lead (Ng), privacy review (Raven), docs (Librarian), testing (Juanita), infrastructure (Da5id).
+
+---
+
+📌 Team update (2026-06-15T05:37:29Z): Week-4 camera SDK gate resolved BLOCKED (CAMERA-I3 — no frame.led control); Librarian shipped Option-C cloud sync; Juanita delivered 53 new tests (296 passed, 22 skipped); Raven approved Phase-2 with 6 merge-blocking conditions. Phase-2 shipping cloud-refinement (model_sync.py); camera deferred Phase-3 — decided by Ng, Librarian, Juanita, Raven
