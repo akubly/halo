@@ -4028,3 +4028,382 @@ The locked Phase-2 direction preserves the core Phase-1 privacy promise for clou
 
 
 
+
+
+---
+
+# Decision Note: Juanita Week-4 Review Fixes
+
+**Date:** 2026-06-14  
+**Author:** Juanita (QA/Test Specialist)  
+**Branch:** `synesthetic-familiar/week4-it-sees`  
+**Status:** RESOLVED — 304 passed, 0 failed
+
+---
+
+## Context
+
+Raven's persona-review of the Week-4 acceptance suite (commit pre-6f7d917) identified 6
+blocking/API conditions against the tests.  Librarian had since finalized the
+`model_sync`/`inference` API in commit 6f7d917, making the conditions actionable.
+
+---
+
+## Conditions Addressed
+
+### [B1] Vacuous pass — test_weight_cannot_exceed_two_times_default
+
+**Problem:** The extreme-update dict used Phase-1 IMU keys (`pitch_var`, `imu_accel`,
+`imu_rot`).  `apply_weight_update` silently ignores unknown keys — only
+`visual_activity` and `visual_brightness` are recognized.  The result dict contained
+only visual keys at near-default EMA values; the `for key in population_defaults` loop
+executed zero iterations.  The test passed every run regardless of what the function did.
+
+**Decision:** Rewrite to use `visual_activity` and `visual_brightness` at 10× their
+defaults.  Add a **presence guard** (`assert present_keys`) before the bounds loop.
+If the function ever drops expected keys, the guard fails loudly instead of silently
+skipping assertions.
+
+**Rationale:** The guard is a permanent structural invariant, not a one-off workaround.
+Any future refactor that renames or drops visual keys will immediately surface here
+rather than silently regressing to another vacuous pass.
+
+---
+
+### [API-REF 1] test_hash_mismatch_does_not_modify_global_state
+
+**Problem:** Called `_model_sync.get_current_weights()` which was removed when
+`model_sync` became pure-functional (no module-level mutable state).  Test was
+skipping with "Add get_current_weights() to model_sync.py".
+
+**Decision:** Rewrite to exercise `sync_population_weights(manifest, current)` directly.
+Pass a sentinel `VisualWeights(visual_activity=0.12, visual_brightness=0.04)` as
+`current`, supply a manifest with `sha256="a"*64` (guaranteed mismatch), mock
+`build_opener` to return valid-looking bytes, and assert `result == current`.  No getter
+needed — the pure-functional contract is: on failure, return the caller's current weights
+unchanged.
+
+---
+
+### [API-REF 2] test_weights_can_be_reset_to_defaults
+
+**Problem:** After calling `reset_weights_to_defaults()`, the test fetched
+`get_current_weights()` to verify the reset.  `get_current_weights` is gone; the
+trailing block was dead code that silently returned without asserting anything.
+
+**Decision:** Assert directly on the return value of `reset_weights_to_defaults()`.
+Normalise to dict (handles both `VisualWeights` and plain-dict returns), then compare
+field-by-field against `DEFAULT_VISUAL_WEIGHTS`.  This makes the test meaningful
+independent of any getter.
+
+---
+
+### [API-REF 3+4] build_opener patching (test_download_request_contains_no_user_id, test_correct_hash_accepts_weights)
+
+**Problem:** Both tests patched `urllib.request.urlopen`, but Librarian's `_download_bytes`
+now calls `urllib.request.build_opener(_HTTPSOnlyRedirectHandler()).open(req, timeout=...)`.
+The `urlopen` patch was a no-op: the real network call to `https://example.com/model.json`
+fired, hit a 404, and either raised `HTTPError` (causing `test_correct_hash_accepts_weights`
+to `pytest.fail`) or returned before capturing any requests (causing `assert captured_requests`
+to fail in `test_download_request_contains_no_user_id`).
+
+**Decision:** Patch `urllib.request.build_opener` to return a `MagicMock` opener.
+Configure `mock_opener.open.side_effect` / `.return_value` as needed.  The `Request`
+object passed to `opener.open()` is still inspectable for URL/header privacy checks.
+
+**Rule going forward:** When Librarian (or any implementer) changes the urllib seam, grep
+test files for the old patch target and update them.  The canonical seam is whichever
+`urllib.request` function the *production code* calls last before the network socket opens.
+
+---
+
+### [NEW] Negative-scheme rejection tests (M3 + I2 coverage)
+
+**Decision:** Add `TestModelI5_NegativeSchemeDownload` — plain pytest class (no
+`TestCase`, required for `parametrize`) with four cases:
+
+| URL | Scheme | Expected |
+|-----|--------|----------|
+| `file:///etc/passwd` | `file` | `ValueError` |
+| `ftp://example.com/w.json` | `ftp` | `ValueError` |
+| `data:application/json,{}` | `data` | `ValueError` |
+| `""` | `""` | `ValueError` |
+
+No mock needed — `_download_bytes` raises before any network I/O.
+
+Also added `test_redirect_downgrade_to_http_raises_value_error` which mocks the opener
+to raise the `ValueError` that `_HTTPSOnlyRedirectHandler.redirect_request` would emit
+on a `302 https://… → http://…` redirect, verifying that `download_weights` propagates
+the error rather than swallowing it.
+
+**Rationale:** `file://` and `data:` URLs are common SSRF vectors.  The redirect
+downgrade covers a subtle MODEL-I5 risk: a CDN that silently downgrades from HTTPS to
+HTTP on redirect.  These cases have zero runtime cost (all fire before network I/O) and
+permanently document the threat model.
+
+---
+
+## Final state
+
+| Metric | Before | After |
+|--------|--------|-------|
+| Passing | 296 | 304 |
+| Failing | 2 | **0** |
+| Skipped | 20 | 19 |
+| New tests | — | +6 (4 parametrized negative-scheme + redirect test, plus existing fixes) |
+
+Skips are exclusively Ng's deferred `_CameraRelay` tests (CAMERA-I1, CAMERA-I6 relay
+path, relay edge cases, mid-BLE drop) — all correctly gate on `_CAMERA_RELAY_AVAILABLE`.
+
+
+---
+
+# Decision: Week 4 Persona-Review Fixes — Librarian
+
+**Date:** 2026-06-15  
+**Branch:** `synesthetic-familiar/week4-it-sees`  
+**Owner:** Librarian (AI/ML)  
+**Files changed:** `projects/synesthetic-familiar/host/inference.py`, `projects/synesthetic-familiar/host/model_sync.py`
+
+---
+
+## Summary
+
+Applied all Aaron-accepted persona-review findings to `inference.py` and `model_sync.py`.  No test files were modified.
+
+---
+
+## Fixes Applied
+
+### I1 — Pure-Functional State Design (model_sync.py)
+
+**Decision:** Remove `get_current_weights()` entirely. Update `apply_weight_update` signature to `(update: dict, alpha: float = 0.1, current: VisualWeights = DEFAULT_VISUAL_WEIGHTS) -> dict`. EMA blends FROM `current`, not from a hardcoded default.
+
+**Rationale:** `get_current_weights()` returned a snapshot of `DEFAULT_VISUAL_WEIGHTS` — data that was never mutated. It implied the module owned weight state when it doesn't and never did. The `apply_weight_update` old signature hardcoded `DEFAULT_VISUAL_WEIGHTS` as the EMA base, making it impossible for callers to accumulate state across successive updates. The pure-functional pattern (caller owns state, module is stateless) is correct for this use case and is now explicit in the module docstring.
+
+**Module docstring addition:** "This module is pure-functional: there is NO internal mutable weight state. Callers own and persist current weights."
+
+---
+
+### I2 — HTTPS Redirect Downgrade Protection (model_sync.py)
+
+**Decision:** In `_download_bytes`, replace `urllib.request.urlopen(req, ...)` with `urllib.request.build_opener(_HTTPSOnlyRedirectHandler()).open(req, ...)`. The handler subclasses `HTTPRedirectHandler` and raises `ValueError` (referencing MODEL-I5) on any redirect whose target scheme is not `https`.
+
+**Rationale:** The initial scheme check (`parsed.scheme != "https"`) only guards the original URL. An HTTPS URL that 301-redirects to HTTP would pass the initial check and silently download from plain HTTP. The redirect handler intercepts this before the downgraded request is made.
+
+**Side effect:** Tests that patch `urllib.request.urlopen` will no longer intercept `_download_bytes` calls (see Juanita fix list below).
+
+---
+
+### I3 — Strict Camera Gate (inference.py)
+
+**Decision:** Change `if camera_ok:` to `if camera_ok is True:` in `compute_mood`. When `camera_ok` is not `True` but non-default visual inputs are passed, emit `logger.debug` noting visual inputs are being ignored (CAMERA-I6).
+
+**Rationale:** The additive invariant requires that only the exact bool `True` unlocks the camera path. Truthy-but-not-bool values (e.g. `1`, a non-empty string, a `MagicMock`) could accidentally activate the camera augmentation path. The strict identity check is the only way to prove the invariant structurally. The debug log is a diagnostic aid for integration: if someone passes `camera_ok=1` with visual inputs and sees no effect, the log explains why.
+
+---
+
+### I4 — Version Enforcement (model_sync.py)
+
+**Decision:** In `_parse_population_weights`, check `obj.get("version") != "1"` immediately after JSON parse and raise `ValueError` with a clear message. All field extraction happens only after version is confirmed.
+
+**Rationale:** Schema versioning is only as strong as the boundary that enforces it. A silent assumption that an unversioned or v2 payload is valid v1 data would silently accept potentially incompatible formats and make future version bumps undetectable.
+
+---
+
+### I5 — Document Dormant Sync (model_sync.py docstring)
+
+**Decision:** Added a `─── DORMANT CAPABILITY (Phase-3 activation) ───` section to the module docstring:  
+> "The sync capability shipped in Week 4 is NOT yet wired into the runtime loop. It will activate alongside the camera in Phase 3 — population visual-weights have nothing live to tune while the camera is deferred. This is intentional, not an oversight."
+
+---
+
+### I6 — Document Trust Model (model_sync.py docstring)
+
+**Decision:** Added a `─── TRUST MODEL ───` section:  
+> "Integrity rests on HTTPS transport + SHA-256 content verification (MODEL-I5). There is NO host allowlist, certificate pinning, or signed manifest. This is acceptable for a single-user playground environment. Future hardening path: signed manifest (GPG/ECDSA) + host pinning."
+
+---
+
+### M1 — Timing-Safe SHA-256 Comparison (model_sync.py)
+
+**Decision:** Replace `actual == expected_hex.lower().strip()` with `hmac.compare_digest(actual, expected_hex.lower().strip())`. Added `import hmac`.
+
+**Rationale:** String equality (`==`) is not timing-safe. Although hash comparison timing side-channels are extremely unlikely to be exploitable in this single-user context, using `hmac.compare_digest` is the correct baseline — it's a one-line change that closes the theoretical attack surface with zero downside.
+
+---
+
+### M2 — Defense-in-Depth Bounds at Trust Boundary (model_sync.py)
+
+**Decision:** In `_parse_population_weights`, after the `>= 0` / `isfinite` checks, also reject values exceeding `DEFAULT_VISUAL_WEIGHTS.<field> * MAX_VISUAL_WEIGHT_MULTIPLIER` with `ValueError`.
+
+**Rationale:** `tune_visual_weights` already clamps values downstream. The trust boundary (`_parse_population_weights`) should also enforce the bound — defense in depth. A downloaded payload with `visual_activity=999.0` should be rejected at ingest, not silently accepted and clamped later.
+
+---
+
+### M4 — `Optional` → union type annotation (model_sync.py)
+
+**Decision:** Change `DEFAULT_MANIFEST: Optional[PopulationManifest] = None` to `DEFAULT_MANIFEST: PopulationManifest | None = None`. Remove `from typing import Optional` (it was the only use of `Optional` in the module).
+
+**Rationale:** `from __future__ import annotations` is already present; the PEP 604 `X | None` syntax is the modern form for Python 3.10+ and matches the style used throughout `inference.py`.
+
+---
+
+## Tests to Fix — Juanita
+
+The following tests reference removed or changed API and will need to be updated:
+
+### `projects/synesthetic-familiar/tests/test_week4_camera_edge_cases.py`
+
+| Test | Class | Issue |
+|------|-------|-------|
+| `test_hash_mismatch_does_not_modify_global_state` | `TestModelI5_HashVerification` (line ~151) | References `get_current_weights()` — removed. Test uses `getattr(_model_sync, "get_current_weights", None)` and skips if absent; now always skips. Needs rewrite to verify state isolation without `get_current_weights`. |
+| `test_weight_cannot_exceed_two_times_default` | `TestOnlineLearningBounds` (line ~444) | Calls `apply_weight_update(extreme_update)` with old-signature dict (Phase-1 keys). New signature requires `current: VisualWeights` as third arg but defaults to `DEFAULT_VISUAL_WEIGHTS`. The old test sends Phase-1 keys (`pitch_var`, `imu_accel`, `imu_rot`) which are unknown to the new function (silently ignored). Test will likely pass but verify its assertions still exercise the right bounds. |
+| `test_weights_can_be_reset_to_defaults` | `TestOnlineLearningBounds` (line ~488) | References `get_current_weights()` at line ~514 for post-reset verification. Now always returns without verifying since the getter is gone. Needs rewrite. |
+
+### `projects/synesthetic-familiar/tests/test_week4_privacy_gates.py`
+
+| Test | Class | Issue |
+|------|-------|-------|
+| `test_download_request_contains_no_user_id` | `TestModelI5_ModelSyncPrivacy` | Patches `urllib.request.urlopen`. `_download_bytes` now uses `build_opener(...).open(...)` (required by I2); the mock is bypassed; the real HTTPS request fires and raises `HTTPError 404`. Needs to patch `urllib.request.build_opener` or mock `OpenerDirector.open`. |
+| `test_correct_hash_accepts_weights` | `TestModelI5_ModelSyncPrivacy` | Same root cause as above — patches `urlopen`, which is no longer called. |
+
+**Note on `test_week4_privacy_gates.py` failures:** These broke because the I2 fix explicitly required switching from `urlopen` to `build_opener(...).open(...)` to prevent HTTPS redirect downgrades. The security property tested (no user-ID in headers, correct hash acceptance) is preserved — only the mock target changed.
+
+
+---
+
+# Decision Note: PR #5 Copilot Review Fixes
+
+**Date:** 2026-06-15  
+**Branch:** `synesthetic-familiar/week4-it-sees`  
+**Author:** Librarian (AI/ML specialist)  
+**Files changed:** `host/inference.py`, `host/model_sync.py`
+
+---
+
+## Context
+
+Copilot flagged 4 valid issues in the Librarian's files during PR #5 review. All four were addressed in this commit.
+
+---
+
+## Fix 1 — On-load clamp in `load_visual_weights()` (inference.py ~line 141)
+
+**Problem:** The function validated non-negative/finite but did NOT enforce the ≤ 2× default upper bound stated in the docstring. A corrupted `~/.vesper/visual_weights.json` could deliver arbitrarily large values to `compute_mood` with no downstream clamp.
+
+**Decision:** Clamp silently on load — `min(float(v), DEFAULT × MAX_VISUAL_WEIGHT_MULTIPLIER)` — consistent with existing load-error behavior (fall-safe to defaults on parse error; over-bound values are clamped rather than rejected, matching the pattern used by `tune_visual_weights`). The docstring promise is now enforced.
+
+**Rationale for clamp-not-reject:** The model_sync parse path rejects out-of-bound. The load-from-disk path is a user-controlled config file; clamping silently recovers gracefully and the user retains whatever was valid. Rejecting would fall back to DEFAULT entirely, losing any valid partial state in the same file.
+
+---
+
+## Fix 2 — Docstring CAMERA-I6 mislabel (inference.py compute_mood ~line 384)
+
+**Problem:** The `compute_mood` docstring attributed the strict `camera_ok is True` identity check to "CAMERA-I6". CAMERA-I6 is the "no image content in logs" privacy gate, not the modality gate.
+
+**Decision:** Replaced "CAMERA-I6" reference in the docstring with accurate language: "strict identity (additive-invariant / modality) gate." No new gate ID invented.
+
+---
+
+## Fix 3 — Debug log CAMERA-I6 mislabel (inference.py ~line 435)
+
+**Problem:** The debug log for the camera-modality skip path was tagged "CAMERA-I6", mislabeling the gate.
+
+**Decision:** Removed "CAMERA-I6" tag from the log message prefix. Message content unchanged; the gate is now described as "camera modality gate."
+
+---
+
+## Fix 4 — `apply_weight_update()` partial-update semantics (model_sync.py ~line 409)
+
+**Problem:** Omitted keys in the `update` dict defaulted to `DEFAULT_VISUAL_WEIGHTS` as the EMA target, causing the other weight to drift toward defaults on every partial update — unintended and undocumented.
+
+**Decision:** Omitted keys now use the corresponding value from `current` as the EMA target (identity: no change). Only keys explicitly present in the update dict are blended toward their stated value. Docstring updated to state this contract explicitly. Bounds/clamp behavior via `tune_visual_weights` is preserved for all present keys.
+
+---
+
+## Test result
+
+304 passed, 19 skipped (19 skips are Ng's `_CameraRelay` tests — camera SDK gate BLOCKED, not a regression).
+
+
+---
+
+# Decision: PR #5 Copilot Review Fixes — Juanita (Tester)
+
+**Date:** 2026-06-15  
+**Branch:** `synesthetic-familiar/week4-it-sees`  
+**Author:** Juanita  
+**Status:** IMPLEMENTED — 304 passed, 19 skipped, 0 failed
+
+---
+
+## Context
+
+Copilot flagged 5 test issues in the Week-4 PR (#5).  All were valid correctness
+problems (vacuous passes, wrong patch targets, overly-broad assertion).  Librarian's
+implementation was already correct; all 5 fixes are test-only changes.
+
+---
+
+## Decision 1 — Force logger level in `_collect_logs_above_debug`
+
+**Problem:** pytest sets the root logger to WARNING.  The `_collect_logs_above_debug`
+helper added a capture handler but never adjusted the target logger level.  INFO
+records were therefore discarded by the logger before reaching the handler — a
+CAMERA-I6 INFO-level violation would pass the test vacuously.
+
+**Decision:** Force the target logger to `logging.INFO` for the duration of the
+capture; restore original level and `propagate` flag in the `finally` block.
+
+**Rationale:** The test is only meaningful if INFO records actually reach the handler.
+Restoring the level preserves pytest's log isolation contract.
+
+---
+
+## Decision 2 — Narrow CAMERA-I6 "jpeg"/"jpg" word ban to content patterns
+
+**Problem:** The banned-substring list included `"jpeg"` and `"jpg"`, which would
+wrongly fail benign diagnostic messages like `"JPEG decode failed"` or
+`"processing jpg input"`.  CAMERA-I6 bans image *content* leakage, not terminology.
+
+**Decision:** Remove `"jpeg"` and `"jpg"` from the banned word list.  Retain
+`"pixel"`, `"raw_frame"`, `"image_data"`.  Add a regex check for `bytes` repr
+patterns (`b'\xNN'`) and keyword checks for dimension/byte-count strings
+(`width=`, `height=`, `dimensions=`, `byte_count=`).
+
+**Rationale:** Aligned to the actual CAMERA-I6 specification: *image content* (raw
+bytes, pixel data, geometry) must not appear in INFO+ logs.  The word "jpeg" in a
+diagnostic message is not content leakage and must not be a gate.
+
+---
+
+## Decision 3/4/5 — Patch `build_opener` (not `urlopen`) in camera_edge_cases.py
+
+**Problem:** Three tests in `test_week4_camera_edge_cases.py` patched
+`urllib.request.urlopen` to simulate hash mismatch rejection (C3), network errors
+(C4), and fallback behaviour (C5).  The production code (`_download_bytes`) uses
+`urllib.request.build_opener(...).open(req, timeout=...)` — a different call site.
+The `urlopen` patch was a no-op; tests could hit the real network, silently swallow
+errors, or pass vacuously.
+
+**Decision:** Replace all three `patch("urllib.request.urlopen", ...)` with
+`patch("urllib.request.build_opener", return_value=mock_opener)` where
+`mock_opener.open.side_effect` delivers the intended response or error.  Add a
+`assert mock_called` sentinel assertion to each test.
+
+**Rationale:** The patch must intercept the call the *production code* actually makes.
+Since `_download_bytes` was already changed (by Librarian) to use `build_opener`,
+any `urlopen` patch is dead.  The sentinel assertion makes future patch drift
+immediately visible rather than producing a silent vacuous pass.
+
+**Consistency:** This is the same fix pattern already applied to `test_week4_privacy_gates.py`
+in the Persona-Review fix cycle (2026-06-14).  The lesson now extends across both test files.
+
+---
+
+## Outcome
+
+All 5 Copilot review comments addressed.  Suite: **304 passed, 19 skipped, 0 failed**.
+Skips are exclusively Ng's `_CameraRelay` tests — no new skips introduced.
+Tests are now fully offline and deterministic.

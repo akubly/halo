@@ -1,49 +1,103 @@
-# Archive: Librarian Learnings (Pre-2026-06-02)
+# Librarian — History Archive
 
-Compressed factual research on AI/ML patterns for Halo. "Proved" vs. "Speculative" distinction maintained throughout.
+# Librarian — AI/ML Specialist (Archived Context Summary)
 
-## Sensor Pipeline → Reference Architecture (Halo)
-**Hardware Inputs:** Camera (ultra low-power), 2x mics + audio activity detection, 6-axis IMU + tap detection, Bluetooth 5.3 only.
-**Processing:** Alif B1 NPU (wake-word, activity detection only); main LLM logic on host (cloud-dependent, cannot run Llama/Mistral locally).
-**Output:** MicroOLED display, 2x bone-conduction speakers, 14hr battery (all-day, always-on gate-keeping critical).
+**Owner:** Aaron Kubly | **Project:** halo mono-repo | **Role:** Anything LLM, VLM, STT, TTS, or agent-loop related
 
-**Patterns Brilliant Demonstrates:** (1) Multimodal as core (Noa = vision+audio always), (2) Cloud-first LLM logic (hardware too constrained), (3) Stateful conversations (memory/personalization), (4) Tap/gesture as interrupt, (5) Always-on audio gate (dual mics + activity detection), (6) Battery trumps features (1W avg max).
+## Pre-Week-3 Context (Archived)
 
-## Brilliant AI Evolution (Monocle → Frame → Halo)
-**Monocle (2023):** Nordic M4F CPU, FPGA, ChatGPT integration, cloud LLM only. Noa added later.
-**Frame (2024):** Nordic M4F CPU, FPGA, Noa v2 (multimodal vision+audio, GPT-4 backend), host-side lightweight models (Whisper STT on host). 720p camera, dual mics, 210mAh battery.
-**Halo (2026):** Alif B1 NPU, no FPGA, Noa v3 (same multimodal, optimized for wearable display+always-on context), on-device gates/filters (activity detection, wake-word). Ultra low-power camera, 2x mics + activity detection, 6-axis IMU, 14hr battery.
+**Early research (2026-06-02):** 9 community AI projects catalogued; CitizenOneX for privacy-first STT. **Ideation pass 2 (2026-06-02):** 8 cross-pollinated patterns, 4 mash-ups (top: Consent-Aware Embodied Memory). **User stories Themes 1–2 (2026-06-03):** Synesthetic Familiar (real-time <500ms mood inference, 7-day calibration, confidence gating) + Consent-Aware Memory (local redaction + async cloud consent). **Codename (2026-06-08):** Team converged on **VESPER** (renamed from PULSE).
 
-**Key progression:** CPU power constant (power-gated), compute strategy FPGA-graphics-only → FPGA+host-ML → NPU-gates-only, camera quality Unspecified → 720p → ultra-low-power-AI-first, sensors 3-axis → 3-axis+dual-mic → 6-axis+dual-mic+activity, battery session-based → always-day.
+**Week 2 (2026-06-10–2026-06-12):** Implemented host/inference.py: mood heuristic (weighted tension: pitch×0.4 + accel×0.3 + rot×0.3), baseline learning via Welford online stats, confidence gating (stressed/calm 0.8, neutral 0.6), sensor-failure reductions (mic ×0.6, IMU ×0.7). Fixed regressions B1 (added MoodResult.tension field), I1 (load_baseline fail-safe), I2 (NaN/inf guards), M4 (audio_rms annotation).
 
-**libmpix role:** Image preprocessing before inference; now explicit on Halo.
+## Week 3 "It's Alive" — Baseline Activation Gate (2026-06-13)
 
-## Community AI Projects (Proved vs. Speculative)
-**Proved (Production on Frame):** 
-- `frame_realtime_gemini_voicevision` (80 stars, official) — Real-time multimodal (camera POV + audio) streaming to Google Gemini Live; voice customization; canonical pattern.
-- Community QR scanners, teleprompter, fitness — UI-centric, stateless; none attempted local LLM.
+**Decision delivered:** ACTIVATION_THRESHOLD = 50 samples (not 3 calendar days).
 
-**Failed to materialize:**
-- Local LLM (Llama, Mistral) — 0 projects found; Frame's nRF52840 (256 KB RAM) insufficient for even 7B quantized; community tried, hit wall, abandoned.
-- RAG-on-glasses — 0 projects.
-- Wake-word detection — 0 Frame projects (speculative for Halo; NPU enables it).
-- Multimodal agent loops — 0 projects.
+**Why sample_count over calendar time:**
+- Welford stddev stability. SE(s)/s ≈ 1/√(2n); at n=50, SE/s ≈ 10% (within ~0.15σ of asymptotic).
+- Calendar time wrong for observation-count-gated estimator. A 5-day-old baseline with 8 samples should stay "calibrating."
 
-**Model ranking (community adoption):** Gemini Live (dominant, Brilliant's official demo), Whisper secondary (STT on host side), GPT/Claude supported but not observed, Llama/Mistral zero on AR glasses.
+**New exports from host.inference:**
+- ACTIVATION_THRESHOLD: int = 50
+- ActivationState = Literal["calibrating", "personalized"]
+- ActivationInfo dataclass: {state, sample_count, samples_needed, progress}
+- get_activation_info(baseline: Baseline | None) -> ActivationInfo (pure function, no I/O)
 
-## GitHub Empirical Validation: "Only Gemini Ships"
-**Sample:** 13 public GitHub repos with identifiable AI model choice on Brilliant hardware.
-**Distribution:** Gemini 92% (12/13); Whisper 0% (docs only), Claude/GPT-4o 0%, Local LLM 0% on AR glasses (1 MacBook Air non-wearable).
-**Root cause:** Gemini Live API only major LLM with true multimodal streaming (voice+vision simultaneously); Claude/GPT-4o request-reply only (higher latency perceived).
-**Community inertia:** Reference implementation (`frame_realtime_gemini_voicevision` 80★) sticky; developers fork rather than rewrite.
+**Integration:** compute_mood() requires aseline.sample_count >= ACTIVATION_THRESHOLD for personal threshold. Y.T. calls get_activation_info() for onboarding UX progress display. Juanita: 34 tests all passing (pure function, no mocking).
 
-**For Halo Playground:** Copy Frame's Gemini Live reference (immediately). Evaluate embeddings fork for post-MVP RAG experiment. Avoid local LLM attempts (will fail power/memory). Document STT choice (Whisper privacy vs. Google cost).
+## Week 3 "It's Alive" — Documentation Sync (2026-06-13)
 
-**Confidence:** Increased from HIGH to VERY HIGH via empirical GitHub data.
+**Task:** Bring ARD.md, TEST-STRATEGY.md, README.md in sync with Week 3 shipped reality. Cite all decision dates.
 
-## Patterns Actually Proved vs. Speculative
-**Proved:** Realtime multimodal cloud API (Gemini Live) production-ready; host-side STT+cloud LLM standard; BLE peripheral model; stateless image frames; display for text+UI feedback.
-**Speculative:** On-device wake-word (Halo's audio activity detection, unproven end-to-end); local LLM inference (theoretical, not viable); RAG-on-glasses (no projects); image-to-action chains.
+**Deliverables:**
 
-## Ideation Garden (Not Promoted)
-8 blue-sky ideas collected (2026-06-02) spanning embodied memory, synesthetic AI, action-chaining, local world models, multiplayer personas, hallucination-as-content, episodic stitching, agentic loops. Raw seeds; not commitments.
+| Document | Update | Status |
+|----------|--------|--------|
+| ARD.md §5.1 Gate Table | Gate 1 (IMU) GO: rame.imu.tap_callback(func) + Lua debounce 350ms; Gate 2 (heap) NO-GO: rame.system absent, manual proxy v1; Gate 3 (sprite) GO: rame.display.circle() confirmed | ✅ |
+| ARD.md §10 Open Q | Q1 (IMU) RESOLVED GO (2026-06-12); Q3 (heap) RESOLVED NO-GO (2026-06-12) | ✅ |
+| ARD.md Build Sequence | Week 3 row 1: ACTIVATION_THRESHOLD=50, IMU-peak render-loop, ATTENTION visual (white eye, 180ms +4px jump), onboarding, fallback verified; row 3: 190+ tests green | ✅ |
+| TEST-STRATEGY.md Week 3 | Expanded success criteria: ATTENTION 500ms overlay, baseline gate 50 samples, 190+ green tests | ✅ |
+| README.md | Codename PULSE → **VESPER**; status "Week 1 scaffold" → **"Week 3 complete"**; new "Week 3 Shipped" deliverables list | ✅ |
+
+**Validation:** No code changes (docs-only). All facts cited to decisions.md (searchable source). No contradictions found between docs/decisions/code. Test count verified: 190+ green (confirmed in Juanita decision 2026-06-13).
+
+**Decision record:** librarian-week3-docs.md merged to decisions.md.
+
+📌 Team update (2026-06-14T05:36:23Z): Da5id eye dilation addendum INCLUDED (§6 Q1); Y.T. activation gate bound; Ng ATTENTION visuals shipped; Raven privacy APPROVED all surfaces; Juanita 72 new tests; 262 tests green — docs now in sync with Week 3 reality — decided by Da5id, Y.T., Ng, Raven, Juanita
+
+## Week 3 PR — Persona-Review Cycle 1 Fixes (2026-06-13)
+
+**Triggered by:** Aaron Kubly after Cycle 1 persona review of branch `synesthetic-familiar/week3-its-alive`.
+
+### M6 — README.md test count corrected
+- Stale "190+" references (2 occurrences) updated to "262".
+- Files touched: `projects/synesthetic-familiar/README.md` only.
+
+### M3 — load_baseline() size guard
+- Added pre-read `path.stat().st_size > 4096` check inside the existing `try` block in `host/inference.py:load_baseline()`.
+- Falls into the existing `except (OSError, ..., ValueError)` handler → returns `None` + warning log. No new exception surface.
+- Valid baseline is ~120 bytes; 4096 is a 33× margin, generous enough for future minor field additions.
+- `OSError` from a broken symlink on `stat()` is already caught.
+
+**Post-fix pytest:** 262 passed, 0 failed (0.42 s). No test adjustments needed.
+
+**Decision record:** `.squad/decisions/inbox/librarian-week3-review-fixes.md`
+
+---
+
+### Cycle 2 Re-Review (2026-06-14)
+
+**Team decision:** All Cycle 1 findings (M3, M6) verified ADDRESSED in Cycle 2 re-review (Correctness, Skeptic, Architect panels). Docs now in sync with Week 3 reality. Final: 265 tests passing.
+
+**Ready for ship-to-pr:** Push branch `synesthetic-familiar/week3-its-alive`, open PR, request Copilot review, then cloud-review-cycle, then squash-merge.
+
+**Phase-2 deferral:** Heap host-visibility wire field (infrastructure).
+
+---
+
+## PR #4 Copilot Review — Docs Corrections (2026-06-14)
+
+**Triggered by:** Copilot PR review on `synesthetic-familiar/week3-its-alive` flagging stale/duplicate content in docs.
+
+### Changes applied
+
+| File | Issue | Fix |
+|------|-------|-----|
+| `projects/synesthetic-familiar/README.md` line 10 | "262 tests green" stale (Y.T. added 3 onboarding integration tests → 265) | Updated to **265** |
+| `projects/synesthetic-familiar/README.md` line 23 | Same "262 tests green" stale count | Updated to **265** |
+| `projects/synesthetic-familiar/README.md` lines 44–46 | Duplicate sentence "See ARD §4–§5.5…" back-to-back | Removed duplicate |
+| `docs/projects/synesthetic-familiar/ARD.md` line ~562 | "190+ tests green" in build-sequence table | Replaced with **"Full Week 3 automated suite green"** (non-numeric) |
+| `docs/projects/synesthetic-familiar/TEST-STRATEGY.md` line ~1361 | "190+ tests green" in milestone success criteria | Replaced with **"comprehensive Week 3 automated test coverage green"** (non-numeric) |
+
+### ⚠️ Durable lesson: do NOT hard-code test counts in spec docs
+
+**README status/badge lines** — exact count is useful; update it when it changes.
+
+**ARD build-sequence tables and TEST-STRATEGY success criteria** — these are durable spec artifacts. A running test count goes stale every sprint and triggers another doc PR. Use intent-based language ("full suite green", "comprehensive coverage green") that survives incremental test additions without doc churn.
+
+**Rule of thumb:** If the number will change every time a developer adds a test, it does not belong in a spec doc. It belongs in CI output or a README badge.
+
+**Decision record:** `.squad/decisions/inbox/librarian-pr4-copilot-fixes.md`
+
+📌 Team update (2026-06-14T07:59:43Z): Phase-2 plan drafted (camera + cloud refinement) — pending Aaron approval. Decisions: Enzo (capability scope), Hiro (architecture). No code written. Affected: implementation lead (Ng), privacy review (Raven), docs (Librarian), testing (Juanita), infrastructure (Da5id).

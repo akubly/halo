@@ -1,8 +1,8 @@
 ---
-updated_at: 2026-06-15T05:37:29Z
-focus_area: VESPER Week 4 "It sees" — cloud-refinement-only branch (synesthetic-familiar/week4-it-sees). Camera BLOCKED by CAMERA-I3 (SDK no LED control). 299 tests green. Option-C federated local refinement shipped. Ready for review-cycle → ship-to-pr.
+updated_at: 2026-06-14T00:48:14Z
+focus_area: VESPER Week 4 "It sees" SHIPPED & MERGED (PR #5, squash 77c6602). Delivered Option-C cloud refinement; camera deferred to Phase 3 (CAMERA-I3 SDK LED gap). 307 tests green. Awaiting next direction.
 active_issues: []
-status: Week 4 "It sees" BUILD COMPLETE. Camera SDK gate verdict: BLOCKED (no frame.led control). Cloud-refinement (Option-C: federated local model sync) shipped (model_sync.py + visual weights). 299 tests (265+34), 19 skipped. Privacy gates approved (6 conditions, 1 merge-blocking: BLE-I4 documentation). Ready for review → ship → cloud-review → merge. Phase-2 shipping cloud-refinement; camera deferred to Phase-3.
+status: Week 4 "It sees" SHIPPED & MERGED. Cloud review complete (4 Copilot rounds, 13 threads). 304 passed, 19 skipped, 0 failed. Privacy gates approved (6 conditions). Camera deferred Phase-3. Ready for Phase-3 planning.
 ---
 
 # What We're Focused On
@@ -70,9 +70,74 @@ status: Week 4 "It sees" BUILD COMPLETE. Camera SDK gate verdict: BLOCKED (no fr
 - BLE thread-safety (multi-threaded host adoption)
 - LESC encryption support (long-term security hardening)
 
+---
 
+## Week 4 "It sees" — SHIPPED & MERGED
 
+**Status:** COMPLETE. Cloud review (4 Copilot rounds) finished. Squash-merged as 77c6602 to main.
 
+### Cloud Review Cycles (Copilot PR #5, 2026-06-14 to 2026-06-15)
 
+**Round 1 (Load Clamping & CAMERA-I6 Labels)**
+- Librarian: Add upper-bound clamp in `load_visual_weights()` to enforce docstring promise
+- Librarian: Fix docstring and debug log misattributing unrelated gate to CAMERA-I6
+
+**Round 2 (Patch Target Drift — urllib seam)**
+- Implementation (Librarian): I2 fix requires `build_opener()` for redirect protection (approved, no change)
+- Tests (Juanita): Update 5 test patches from `urlopen` to `build_opener` with mock opener
+
+**Round 3 (Omitted Keys Semantics)**
+- Librarian: `apply_weight_update()` now uses caller's current value (not defaults) for omitted keys; docstring clarified
+
+**Round 4 (Test-Specific Issues)**
+- Juanita: Force logger level in capture handler; fix CAMERA-I6 banned-word check (remove global "jpeg"/"jpg", add content-specific patterns)
+- All: Sentinel assertions added to prevent future patch drift
+
+**Test Results:**
+| Metric | Before | After |
+|--------|--------|-------|
+| Passing | 299 | 304 |
+| Failing | — | 0 |
+| Skipped | 19 | 19 |
+
+Skips: All 19 are Ng's `_CameraRelay` tests (CAMERA-I3 blocked). No regression.
+
+### Merge & Cleanup (Post-Merge Bookkeeping)
+
+| Item | Status |
+|------|--------|
+| **Cloud review** | ✅ 4 rounds (13 threads total) all addressed |
+| **Test suite** | ✅ 304 passed, 19 skipped, 0 failed |
+| **Branch merge** | ✅ Squash-merged as 77c6602 to main |
+| **Decisions merge** | ✅ 4 inbox files merged to decisions.md |
+| **Session log** | ✅ .squad/log/2026-06-14-week4-cloud-review-merge.md written |
+| **Orchestration logs** | ✅ 2 agent logs (.squad/orchestration-log/) written |
+| **Privacy gates** | ✅ Raven approved: 6 conditions (1 merge-blocking BLE-I4 satisfied) |
+
+### Deliverables (Week 4)
+
+1. **Option-C Federated Local Cloud Refinement**
+   - `host/model_sync.py` — population weight sync (pure-functional, offline capable)
+   - HTTPS-only transport, SHA-256 verification, dormant until Phase-3 camera activation
+
+2. **Inert Additive Visual-Weight Extension**
+   - `host/inference.py` — visual activity/brightness inputs to mood computation
+   - Strict identity gate: `camera_ok is True` (additive invariant enforcement)
+   - Debug logging for diagnostic clarity
+
+3. **Full Privacy/Security Compliance**
+   - CAMERA-I1, CAMERA-I2, CAMERA-I4, CAMERA-I6 — all satisfied
+   - MODEL-I5, BLE-I4 — all satisfied
+   - CAMERA-I3 (LED control) — BLOCKED (Halo SDK limitation, Phase-3 pending)
+
+### Next Phase
+
+**Status:** Week 4 complete. Camera capability deferred to Phase 3 (CAMERA-I3 LED control pending Halo SDK update).
+
+**Awaiting:** Phase-3 planning + Halo SDK update for LED frame control.
+
+---
+
+## Phase 2 Deferral & Closure
 
 
