@@ -433,7 +433,9 @@ class TestUpdateBaselineHardened:
 
 
 class TestCameraGateOffNonFloat:
-    """CAMERA-I6 guard: gate-off path must never raise on non-numeric visual inputs."""
+    """Camera modality gate-off (additive-invariant path): when camera_ok=False the
+    camera block is structurally unreachable, so non-numeric visual inputs must be
+    ignored without raising and the Phase-1 result must be returned unchanged."""
 
     def test_camera_off_string_visual_activity_does_not_raise(self) -> None:
         """camera_ok=False with a string visual_activity must not raise and must
@@ -450,6 +452,44 @@ class TestCameraGateOffNonFloat:
         assert result.mood == "neutral", (
             f"camera_ok=False must ignore visual_activity and return Phase-1 mood; "
             f"got '{result.mood}'"
+        )
+
+
+# ── model_sync: non-dict JSON payload ────────────────────────────────────────
+
+try:
+    from host.model_sync import _parse_population_weights
+    _MODEL_SYNC_IMPORT_ERROR: str | None = None
+except ImportError as _msync_e:
+    _parse_population_weights = None  # type: ignore[assignment]
+    _MODEL_SYNC_IMPORT_ERROR = str(_msync_e)
+
+
+class TestParsePopulationWeightsNonDict:
+    """_parse_population_weights must fail closed (return None) for valid JSON
+    that is not an object — the caller sync_population_weights then returns
+    current unchanged, preserving the fail-closed guarantee."""
+
+    def _skip_if_unavailable(self) -> None:
+        if _MODEL_SYNC_IMPORT_ERROR is not None:
+            pytest.skip(f"host.model_sync not importable: {_MODEL_SYNC_IMPORT_ERROR}")
+
+    def test_json_list_payload_returns_none(self) -> None:
+        """A JSON array is valid JSON but not an object — must return None, not raise."""
+        self._skip_if_unavailable()
+        payload = json.dumps([{"version": "1", "visual_activity": 0.15, "visual_brightness": 0.05}])
+        result = _parse_population_weights(payload.encode())
+        assert result is None, (
+            f"JSON list payload must be rejected (return None); got {result!r}"
+        )
+
+    def test_json_scalar_payload_returns_none(self) -> None:
+        """A JSON scalar (number) is valid JSON but not an object — must return None."""
+        self._skip_if_unavailable()
+        payload = json.dumps(42)
+        result = _parse_population_weights(payload.encode())
+        assert result is None, (
+            f"JSON scalar payload must be rejected (return None); got {result!r}"
         )
 
 

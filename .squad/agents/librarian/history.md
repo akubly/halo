@@ -188,3 +188,4 @@ The HTTP GET carries: `Host`, `User-Agent: Python-urllib/<version>`, `Accept-Enc
 **Docstring log-level accuracy (PR #5 Copilot re-review):** keep docstring log-level claims in sync with actual logger calls.
 
 **Gate-off/ignore paths must never raise on bad input (PR #5 Copilot re-review):** use non-throwing formatting (`%r`/`%s`) in diagnostic logs on any path whose whole purpose is to ignore an input — assume those inputs may be invalid types.
+validate json.loads payload is a dict before .get() so non-object payloads fail closed as ValueError.

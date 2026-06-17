@@ -207,6 +207,10 @@ def _parse_population_weights(data: bytes) -> VisualWeights | None:
     """
     try:
         obj = json.loads(data.decode("utf-8"))
+        if not isinstance(obj, dict):
+            raise ValueError(
+                f"population weights payload must be a JSON object; got {type(obj).__name__}"
+            )
 
         # ── Version enforcement (I4) ──────────────────────────────────────────
         version = obj.get("version")
