@@ -1,266 +1,3 @@
-# Halo Decisions Log
-## 2026-06-08
-
-### Testing Decision: London-School TDD for The Synesthetic Familiar
-
-| Field | Value |
-|-------|-------|
-| **Author** | Juanita (Tester / QA) |
-| **Date** | 2026-06-08 |
-| **Status** | PROPOSED — for team review |
-| **Scope** | Synesthetic Familiar test suite + any future BLE/host-device Python projects |
-| **Reference** | docs/projects/synesthetic-familiar/TEST-STRATEGY.md |
-
----
-
-## Decision
-
-**Adopt London-school (mockist, outside-in) TDD as the test methodology for
-the Synesthetic Familiar, and recommend it as the default for all future
-host-device Python projects in this repo.**
-
----
-
-## Rationale
-
-### Why London, not Detroit
-
-Detroit (classicist) TDD tests observable state: call a function, assert on
-return values. It works well for pure-function-heavy codebases where
-collaborators are stable or trivial.
-
-The Synesthetic Familiar is neither. It has four hard collaborators that
-cannot or should not be real in a test environment:
-
-1. **BLE transport** (`brilliant-ble`) — an external SDK over a physical radio.
-   Testing against a real BLE device means every host-side unit test requires
-   hardware, takes 10-30s to connect, and fails intermittently due to radio
-   flake. This is unacceptable for a fast-feedback test suite.
-
-2. **Sensor source** (mic + IMU) — hardware on the host phone and device relay.
-   Audio capture and IMU relay cannot be scripted without injection. We need
-   to drive the inference pipeline with specific `(rms, pitch_variance, accel,
-   rot)` values to test thresholds, confidence gating, and fallback paths.
-
-3. **The clock** — breathing interpolation (200-500ms), BLE timeout (10s →
-   neutral), and confidence-hold timing all depend on wall time. Without clock
-   injection, timing tests require `time.sleep()` — which is slow, fragile,
-   and CI-unfriendly.
-
-4. **The Lua render loop** — running on hardware we don't own during testing.
-   We cannot assert on pixel output without either an emulator or extracting
-   pure logic from the render loop.
-
-London school makes these collaborators visible as **ports**: named interfaces
-that test doubles plug into. This drives better architecture: `FamiliarApp`
-takes a `TransportPort`, a `SensorSourcePort`, and a `ClockPort` — injected,
-not hard-wired. The test suite naturally produces a dependency-injection
-architecture that is also easier to extend (swap mic → camera sensor source
-in Phase 2 without touching `inference.py`).
-
-### The Outside-In, Interface-Discovery Benefit
-
-Writing acceptance tests first before `FamiliarApp` exists forced interface
-discovery:
-- `run_cycle()` was named by a test, not a design meeting
-- The confidence gate belongs in the orchestrator (`run_cycle()`), not inside
-  `compute_mood()` — Tell-Don't-Ask is a natural consequence of mockist testing
-- The `FakeClock` requirement forced clock injection, which revealed that
-  `main.py` would otherwise have had `time.monotonic()` buried in its body
-
-### The Red→Green→Refactor Discipline
-
-This project is a 2-3 week playground demo. Without discipline, it will
-accumulate technical debt in the inference thresholds, the wire-format
-encoding, and the Lua state machine. Red→Green→Refactor makes the
-refactoring phase mandatory and safe: no production code is touched unless
-tests are green.
-
----
-
-## Alternatives Considered
-
-| Alternative | Rejected? | Reason |
-|-------------|-----------|--------|
-| Detroit TDD (state-based) | Yes | BLE/sensor/clock collaborators make state-based testing impractical without real hardware |
-| No TDD (write tests after) | Yes | Inference thresholds and confidence gating are easy to get subtly wrong; tests-after miss the interface-discovery benefit |
-| Integration-first (emulator only) | No (kept for Tier 3) | Emulator tests are valuable but slow; not a replacement for fast unit/acceptance tests |
-
----
-
-## Constraints & Caveats
-
-- The `halo-emulator` is described as "experimental" (Juanita history.md).
-  Integration tests at Tier 3 may have emulator gaps. Do not rely solely on
-  emulator for correctness; acceptance tests with FakeTransport are the
-  primary correctness gate.
-- Lua unit testing requires either `busted` (Lua test framework) or extracting
-  pure logic into a Python simulation. The team should confirm busted is
-  installable in CI before committing to it.
-- Three ARD gaps (heap API, FAMILIAR_ACK trigger, `on_imu_peak` polling)
-  create test blockers for specific stories. These are documented in
-  TEST-STRATEGY.md Appendix A and must be resolved before those stories
-  are considered testable.
-
----
-
-
-## 2026-06-08T07:03Z: Project codename — VESPER
-
-**Status:** DECIDED  
-**Owner:** Aaron Kubly  
-**Date:** 2026-06-08  
-**Related:** Theme-2 Synesthetic Familiar
-
-The "synesthetic-familiar" project's official codename is **VESPER**. Whole-team brainstorm produced candidates with team consensus at PULSE (4/9 agents) and other pitches including VESPER, EMBER, AURA, VEIL, ORACLE, CANARY, ECHO, GLIMMER, RESONANCE, GLOAM. Aaron selected VESPER for its twilight/peripheral-awareness resonance, strong naming hygiene (low OSS collision risk), distinctive pronunciation, and slug quality.
-
-**Scope note:** VESPER is the codename; "synesthetic-familiar" remains the descriptive project name and directory. No directory rename unless Aaron requests it.
-
----
-
-## 2026-06-08: VESPER ARD Architecture Clarifications
-
-**Status:** DECIDED  
-**Owner:** Hiro (Architect)  
-**Date:** 2026-06-08  
-**Related:** Post-test-strategy advisory review
-
-Advisory review of VESPER ARD surfaced three ambiguities; Aaron approved fixes. All changes landed in `docs/projects/synesthetic-familiar/ARD.md`.
-
-**Decision 1: Heap Ownership — Device-Local**
-- Lua device monitors heap internally (80% → reduce complexity; 95% → safe-halt).
-- No heap state surfaced in host-bound messages. `FAMILIAR_ACK` carries `last_received_seq` only — no heap field.
-
-**Decision 2: Quick-Reset Ownership — Device-Originated**
-- Double-tap gesture detected and handled on-device (Lua IMU/tap input); device snaps to NEUTRAL immediately.
-- `FAMILIAR_RESET` direction is **Device → Host** (notification, not command).
-- Rationale: Wearer corrects bad inference in real-time. Host round-trip adds 100-300ms latency and fails under BLE degradation.
-
-**Decision 3: Confidence Gating Authority — Host Only**
-- Host is the single authority for confidence gating. If confidence < 0.7, host does not send update — period.
-- Device-side gating is optional defense-in-depth, not required behavior.
-
----
-
-## 2026-06-08: VESPER BLE Wire-Format Specification
-
-**Status:** DECIDED  
-**Owner:** Ng (SDK Engineer)  
-**Date:** 2026-06-08  
-**Related:** ARD §5.2 wire format under-specified; test code invented endianness, seq wraparound, dedup policy, reset opcode
-
-Wire-format specification fully pinned to prevent Python host and Lua device drift.
-
-**1. Endianness: Little-endian (LE) for all multi-byte fields** (BLE ATT native, Cortex-M55 native).
-
-**2. Sequence Number: uint16, wraps 0xFFFF → 0x0000**
-- Host increments seq monotonically on each `FAMILIAR_UPDATE`; resets at reconnect.
-- Device dedup rule: `delta = (received_seq - last_accepted_seq) mod 65536`; interpret as signed 16-bit: delta 1–32767 = newer (accept), 0 = duplicate (drop), 32768–65535 = stale (drop).
-
-**3. Opcode Space: 0x00–0x7F Device→Host, 0x80–0xFF Host→Device**
-- `0x80` = `FAMILIAR_UPDATE` (Host→Device): opcode, mood_enum, intensity, confidence, seq [6B]
-- `0x02` = `FAMILIAR_ACK` (Device→Host): opcode, last_received_seq [3B]
-- `0x01` = `FAMILIAR_RESET` (Device→Host): opcode only [1B]
-
-**4. FAMILIAR_RESET: Device→Host only.** Device snaps to NEUTRAL on double-tap locally (Lua). Host does NOT send reset command.
-
-**5. FAMILIAR_ACK Cadence:** Auto every 10 accepted `FAMILIAR_UPDATE` packets (~1 ACK/sec @ 10Hz) + unsolicited on BLE reconnect.
-
----
-
-## 2026-06-08: Test Strategy Rev 2 — Review Findings Closed
-
-**Status:** DECIDED  
-**Owner:** Juanita (Tester / QA)  
-**Date:** 2026-06-08  
-**Related:** TEST-STRATEGY.md Rev 1 advisory review (3 blocking, 7 important, 1 minor category)
-
-All 11 advisory review findings (3 blocking, 7 important, 1 minor) are closed in TEST-STRATEGY.md Rev 2.
-
-**Blocking Findings:**
-- **B1 — Heap Tests → Device Tier Only:** Heap management entirely device-local (Lua). No heap state on wire. `FAMILIAR_ACK` is seq-only. Rewritten as device-tier-only tests (busted + emulator).
-- **B2 — Wire Format:** All `>H` replaced with `<H` (LE). §6.6 rewritten with signed-16 delta window dedup. Explicit tests for duplicate/stale/wraparound. `FAMILIAR_RESET` = 0x01 Device→Host. `FAMILIAR_ACK` = auto every 10 packets, seq-only.
-- **B3 — False-Positive Bug in §4.2:** Single `FakeTransport()` instance used for both constructor and assertion. Code comment added documenting intent.
-
-**Important Findings:**
-- **I4 — Honest London-School Framing:** §1 updated with mixed-methodology table. Tell-Don't-Ask corrected: `FamiliarApp` orchestrates, not `inference.py`. Red guidance pre-stubs `FamiliarApp`.
-- **I5 — Decouple Acceptance from Heuristic:** All acceptance tests inject controlled `inference_fn`; sensor values stay in classicist unit tests (`test_inference.py`).
-- **I6 — Confidence Gating Ownership:** Device-side gating relabeled "optional defense-in-depth." Host is sole authority (ARD §5.4).
-- **I7 — Privacy/Jitter:** §6.8 added seeded-RNG seam; busted test asserts jitter 5–10%. §4.1 added: `encode_familiar_update` cannot accept raw sensor parameters.
-- **I8 — Lua Testing Authority:** `busted` declared authoritative Lua check. §7.3 rewritten: property tests must drive real Lua interpreter, not Python clone.
-- **I9 — Quick-Reset Seam:** JUANITA-T2-5 updated: "Device detects double-tap → Lua snaps to NEUTRAL locally; host receives FAMILIAR_RESET notification (0x01)."
-- **I10 — Story-Mapping Alignment:** YT-T2-2 replaced with baseline-adaptation behavior (ARD-grounded). RAVEN-T2-1 updated to acceptance (protocol) + manual (visual).
-
-**Minor Finding:**
-- **M11 — Appendix A Blockers:** Restructured into RESOLVED (R1–R7: endianness, ACK, seq, FAMILIAR_RESET, heap, confidence, quick-reset) and OPEN (7 items: emulator API, RNG seam, sprite format, baseline persistence, IMU interrupt). No review findings remain open.
-
----
-
-## 2026-06-08: Skip Standalone Technical Design for VESPER Phase 1
-**Status:** Proposed  
-**Owner:** Hiro (Architect)  
-**Date:** 2026-06-08  
-**For:** Aaron (final approval)
-
-## Recommendation
-
-**Do not author a standalone technical design document before Week 1 implementation.** The ARD + Test Strategy already cover implementation-grade detail. A separate tech design would re-litigate locked decisions and add documentation overhead disproportionate to a 2–3 week playground project.
-
-## What the ARD Already Covers (implementation-grade)
-
-- **Wire format** (§5.2): Byte-level spec for all 3 message types, endianness, seq wraparound/dedup, opcode space, ACK cadence — normative, not sketched
-- **Component decomposition** (§5.1–§5.5): File-level structure (\main.lua\, \host/main.py\, \sensors.py\, \inference.py\, \amiliar_protocol.py\), responsibilities per module
-- **Interface contracts** (§5.3–§5.4): Constructor signatures, inference pipeline code, confidence gating logic, sensor fallback hierarchy
-- **State machine** (§5.1): Four states with transitions and thresholds
-- **Render spec** (§5.5): Sprite size, position, palette, animation per state, lit-pixel budget, rendering primitives
-- **Autonomy table** (§4): Component-by-component location decisions with ownership (host vs. device)
-- **Dependency list** (§6): Exact packages, versions, licenses
-
-## What the Test Strategy Already Covers
-
-- **Ports & Adapters seams** (§3): \TransportPort\, \SensorSourcePort\, \ClockPort\ with real/fake adapter pairs
-- **Constructor injection signatures** (§3): \FamiliarApp.__init__\ with all injectable dependencies
-- **Test pyramid** (§2): Four-tier structure with mock/real boundaries per layer
-- **Story→test mapping** (§5): Every user story mapped to specific test expectations
-- **Definition of Done per story** (§9): Concrete acceptance criteria
-
-## What a Tech Design Would Add — and Why It's Not Worth It
-
-| Potential Addition | Value | Why Skip |
-|--------------------|-------|----------|
-| Class diagrams / UML | Visual overview | ARD §5 is already file-level; drawing boxes around 5 files adds ceremony, not clarity |
-| Sequence diagrams (host↔device) | Timing clarity | §4 data flow + §5.2 wire format already specify the exact sequence at byte level |
-| API contracts doc | Formal interfaces | Test Strategy §3 already defines port interfaces with constructor signatures |
-| Error handling matrix | Exhaustive failure modes | ARD §5.4 fallback hierarchy + §8 risk table + Test Strategy §6 edge cases cover this |
-| Performance budgets | Quantified targets | ARD §5.5 already specifies: 50ms/frame, 32 sprites/frame, <5mW idle, 15–30fps |
-
-## Lightweight Replacement
-
-Instead of a tech design doc, use **per-package READMEs written during implementation** (not before):
-
-1. \synesthetic-familiar/host/README.md\ — emerges from Week 1 code
-2. \synesthetic-familiar/device/README.md\ — emerges from Week 1 code
-3. ARD §10 open questions (6 items) get resolved inline as Ng investigates SDK gaps
-
-These are cheaper, stay current, and don't front-load speculation.
-
-## Anti-Anchoring: When Would a Tech Design Be Warranted?
-
-A standalone tech design would be the right call if:
-
-- **The ARD were requirements-only** (what, not how) — but it's not; §5 is implementation-grade
-- **Multiple implementers needed coordination** — but Phase 1 is one dev (Aaron) with agent support
-- **The wire format were still open** — but Ng locked it on 2026-06-08
-- **Cross-package integration were complex** — but this is 2 packages (host Python, device Lua) with 1 BLE pipe
-
-Evidence that would change my mind: if Aaron starts Week 1 and finds himself re-reading the ARD to answer "how should X talk to Y" questions that the ARD doesn't address, that's the signal to write a thin interface-contract doc mid-sprint. But write it from real confusion, not speculative prevention.
-
-## Verdict
-
-Start Week 1. Let the code teach us what the ARD missed. Document as you go, not before.
-
----
-
 ## 2026-06-09: VESPER Package Layout
 
 | Field | Value |
@@ -4407,3 +4144,96 @@ in the Persona-Review fix cycle (2026-06-14).  The lesson now extends across bot
 All 5 Copilot review comments addressed.  Suite: **304 passed, 19 skipped, 0 failed**.
 Skips are exclusively Ng's `_CameraRelay` tests — no new skips introduced.
 Tests are now fully offline and deterministic.
+
+
+---
+
+# 2026-06-16: SDK Re-check (GAP-3 & CAMERA-I3 STILL MISSING)
+
+# SDK Re-check: GAP-3 & CAMERA-I3 Status
+**Date:** 2026-06-16  
+**Author:** Ng (SDK Engineer)  
+**Requested by:** Aaron Kubly  
+**Baseline:** 2026-06-12 feasibility investigation
+
+---
+
+## GATE A — Heap Introspection API (GAP-3)
+
+**VERDICT: STILL MISSING**
+
+### What we needed
+`frame.system.get_heap_usage()` or any heap/free-memory introspection so `device/main.lua` can enforce 80%-reduce / 95%-halt guards with real data.
+
+### What was checked
+| Source | Last updated | Relevant finding |
+|--------|-------------|-----------------|
+| `docs.brilliant.xyz/halo/halo-sdk-lua/` | 2026-06-04 (pre-baseline) | System table lists: battery_level/voltage/charging, sleep/standby/light_sleep/ship_mode, stay_awake, charge, on_wakeup, wakeup_source, yield, reboot, get_eui — **no heap or memory method** |
+| `brilliantlabsAR/docs` repo, `halo/halo-sdk-lua.md` | 2026-06-04 | Section headers: System, Time, File System, Button, Bluetooth, IMU, Compression, Speaker, Microphone, Display, Camera, Camera Image Processing — **no heap section, no `collectgarbage` mention** |
+| `brilliantlabsAR/frame-codebase` Lua base library | Last code commit 2025-10-05 | `collectgarbage` exists in `libraries/lua/lbaselib.c` — but this repo is Frame/Frame Lite firmware only, not Halo |
+| `brilliantlabsAR/brilliant_sdk` | Last commit 2026-06-14 | BLE chunking fix + OTA flash; no Halo Lua surface changes |
+
+### Status of our code
+`heap_fraction()` in `device/main.lua` returns compile-time constant (`~0.02`). Guards annotated with `-- WARNING: INERT`. Structure preserved for one-line swap when/if API arrives.
+
+### What would unblock it
+If a future Halo firmware version exposes `frame.get_heap_usage()` (or similar), the fix is one line:
+```lua
+-- CURRENT (inert):
+local function heap_fraction() return 0.02 end
+-- FUTURE (one-line swap):
+local function heap_fraction() return frame.get_heap_usage() / frame.HEAP_SIZE end
+```
+Note: Lua's `collectgarbage("count")` availability on Halo is unconfirmed (not documented; Halo firmware is not public). Do not assume it works without on-device testing.
+
+---
+
+## GATE B — Camera Recording-Indicator LED (CAMERA-I3)
+
+**VERDICT: STILL MISSING**
+
+### What we needed
+A way to force the hardware recording-indicator LED ON during camera capture, so bystanders are visually warned of active capture.
+
+### What was checked
+| Source | Last updated | Relevant finding |
+|--------|-------------|-----------------|
+| `docs.brilliant.xyz/halo/halo-sdk-lua/` TOC | 2026-06-04 | No "LED" section. Camera section lists only: `capture`, `image_ready`, `read`, `read_raw`, `power_save` — no LED reference |
+| `brilliantlabsAR/docs` repo, `halo-sdk-lua.md` | 2026-06-04 | grep for "led", "indicator", "heap", "memory", "collectgarbage" → zero matches |
+| `brilliantlabsAR/frame-codebase` `source/application/lua_libraries/led.c` | Last commit 2025-10-05 | `frame.led.set_color(r, g, b)` (0–100 per channel) via PWM — but targets `FRAME_LITE_LED_RED/GREEN/BLUE_PIN` (Frame Lite hardware only). `lua_open_led_library()` is called in `luaport.c` line 141 — **only on Frame Lite, not Halo** |
+| `brilliantlabsAR/brilliant_sdk` commits since 2026-06-12 | 2026-06-14 | Flutter BLE lifecycle fix; Halo OTA flash added to brilliant_ble; no Halo Lua API surface changes |
+
+### Important structural note
+`frame-codebase` README: "Welcome to the complete codebase of the **Frame** hardware." Frame Lite has an RGB LED and `frame.led.set_color(r,g,b)` — but **Halo is a different device with no public firmware repo**. The `frame.led.*` API found in `frame-codebase` is **not available on Halo**.
+
+### Camera block stands
+CAMERA-I3 remains the Phase-3 camera blocker. No workaround exists within the Halo SDK:
+- Display flash ≠ hardware indicator (rejected by Raven)
+- `frame.camera.capture()` triggers no visible indicator (confirmed in docs and prior investigation)
+- Custom firmware is outside Ng's charter
+
+### What would unblock it
+If a future Halo firmware release adds `frame.led.*` or makes `frame.camera.capture()` auto-enable a hardware indicator, revisit CAMERA-I3 gate. The `frame.camera.mpix.get_stats()` stats-only path (no JPEG BLE transfer) remains the cleanest Phase-3 architecture if/when that happens.
+
+---
+
+## Firmware/SDK Version Reference (as of this check)
+
+| Artifact | Latest version | Date |
+|----------|---------------|------|
+| Halo firmware (from docs example) | `0.6.2-rc` | — |
+| Halo docs (`docs.brilliant.xyz/halo/`) | — | Last updated 2026-06-04 |
+| `frame-codebase` (Frame/Frame Lite firmware) | v25.278.1113 | 2025-10-05 |
+| `brilliant_sdk` Flutter | v2.0.0 | 2026-06-14 |
+| `brilliant_ble` Flutter | v5.0.1 | 2026-06-14 (chunking fix) |
+
+No Halo-specific firmware repository found under `brilliantlabsAR` (21 public repos searched 2026-06-16).
+
+---
+
+## Impact Summary
+
+| Gate | Current code impact | Next action |
+|------|--------------------|----|
+| GATE A (heap) | `heap_fraction()` stub in `device/main.lua` stays inert; guards never fire | Watch Halo firmware release notes; no code change needed now |
+| GATE B (LED) | Camera deferred to Phase-3; no `device/main.lua` camera code | Watch Halo SDK for `frame.led.*`; CAMERA-I3 gate re-evaluated at Phase-3 kickoff |
